@@ -229,7 +229,7 @@ export default function BookingBox({ onSearch }) {
             {/* Submit */}
             <div className="md:col-span-12 flex justify-end">
               <Link
-                href="/CarBox"
+                href="/carbox"
                 className="w-full md:w-auto inline-flex items-center justify-center gap-2 px-5 md:px-6 py-3 rounded-xl md:rounded-2xl bg-black text-white font-semibold hover:bg-gray-800 active:scale-[.99] transition"
               >
                 ค้นหารถว่าง
