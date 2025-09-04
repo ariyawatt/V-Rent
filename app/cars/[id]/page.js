@@ -1,26 +1,26 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/Footer";
 import Image from "next/image";
 import Link from "next/link";
-import { getCarById } from "@/data/cars"; // <<< เอาข้อมูลจากไฟล์กลาง
-import { notFound } from "next/navigation";
+import { getCarById } from "@/data/cars";
 
-export default function CarInfo({ params }) {
+export default function CarInfo() {
   const [open, setOpen] = useState(false);
 
-  // หารถจาก id (memo กัน re-render)
-  const car = useMemo(() => getCarById(params.id), [params.id]);
+  // ✅ Next.js 15: ใช้ useParams แทนการรับ { params } ตรง ๆ
+  const params = useParams();
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
 
-  // ถ้าไม่มีข้อมูลรถคันนั้น -> 404
-  if (!car) {
-    if (typeof window === "undefined") {
-      // ระหว่าง SSR (เผื่อใช้ในเวอร์ชัน server)
-      notFound();
-    }
-  }
+  // ✅ รับ query และส่งต่อได้
+  const search = useSearchParams();
+  const queryTail = search.toString() ? `?${search.toString()}` : "";
+
+  // หารถจาก id (memo กัน re-render)
+  const car = useMemo(() => getCarById(String(id)), [id]);
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && setOpen(false);
@@ -32,8 +32,8 @@ export default function CarInfo({ params }) {
     };
   }, [open]);
 
+  // Fallback ถ้าไม่พบรถ
   if (!car) {
-    // Fallback เผื่อ client ยังไม่เจอ (เช่นพิมพ์ id แปลกๆ)
     return (
       <div className="min-h-screen bg-white">
         <Headers />
@@ -85,7 +85,6 @@ export default function CarInfo({ params }) {
               <h1 className="text-3xl md:text-4xl font-bold mb-2 text-black">
                 {car.name}
               </h1>
-
               <p className="text-gray-700">
                 {car.brand} • {car.type}
               </p>
@@ -105,9 +104,12 @@ export default function CarInfo({ params }) {
             </div>
 
             <div className="mt-8">
-              <button className="w-full md:w-auto px-6 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition">
+              <Link
+                href={`/booking/${car.id}${queryTail}`} // ✅ ส่ง query ต่อไปด้วย
+                className="inline-block w-full md:w-auto px-6 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition text-center"
+              >
                 จองรถคันนี้
-              </button>
+              </Link>
             </div>
           </div>
         </div>

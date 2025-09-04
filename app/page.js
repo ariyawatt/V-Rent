@@ -11,7 +11,7 @@ export default function Home() {
       {/* ปุ่ม Continue ด้านล่างตรงกลาง */}
       <div className="absolute bottom-10">
         <Link
-          href="/Mainpage"
+          href="/mainpage"
           className="px-8 py-4 bg-black text-white text-lg rounded-lg transition-colors duration-300 hover:bg-gray-800"
         >
           Continue

@@ -2,7 +2,7 @@
 
 import Footer from "@/Components/Footer";
 import Headers from "@/Components/Header";
-import BookingBox from "@/Components/ฺBookingBox";
+import BookingBox from "@/Components/bookingbox";
 
 export default function Home() {
   const handleSearch = (data) => {
