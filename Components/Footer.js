@@ -35,8 +35,8 @@ export default function Footer() {
             <a href="#" className="hover:text-pink-500">
               Instagram
             </a>
-            <a href="#" className="hover:text-sky-400">
-              Twitter
+            <a href="#" className="hover:text-gray-600">
+              X
             </a>
           </div>
         </div>
