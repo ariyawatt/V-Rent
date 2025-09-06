@@ -384,7 +384,7 @@ export default function AdminPage() {
         discount: 0,
         deposit: 5000,
         paymentStatus: "รอชำระ",
-        bookingStatus: "ยืนยันแล้ว",
+        bookingStatus: "รอชำระ",
         channel: "Call",
         createdAt: toISO("2025-09-05T11:00:00"),
         notes: "ลูกค้าขอรับรถไวได้ถ้ามี",
