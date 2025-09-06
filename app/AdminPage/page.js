@@ -52,14 +52,37 @@ function fmtDateTime(iso) {
   return `${y}-${m}-${dd} ${hh}:${mm}`;
 }
 
+/* เพิ่ม util สำหรับ input type="datetime-local" */
+function isoToLocalInput(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
+    d.getHours()
+  )}:${p(d.getMinutes())}`;
+}
+function localInputToISO(localStr) {
+  if (!localStr) return "";
+  const d = new Date(localStr); // local time -> Date
+  return d.toISOString();
+}
+
 /* ───────────── Badges ───────────── */
 const StatusBadge = ({ value }) => {
-  const isAvail = value === "ว่าง";
+  const map =
+    value === "ว่าง"
+      ? "bg-green-100 text-green-800"
+      : value === "ถูกยืมอยู่"
+      ? "bg-red-100 text-red-800"
+      : value === "ซ่อมแซม"
+      ? "bg-amber-100 text-amber-800"
+      : "bg-gray-100 text-gray-700";
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-        isAvail ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-      }`}
+      className={cls(
+        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium",
+        map
+      )}
     >
       {value}
     </span>
@@ -73,6 +96,8 @@ const BookingBadge = ({ value }) => {
       ? "bg-amber-100 text-amber-800"
       : value === "ยกเลิก"
       ? "bg-gray-200 text-gray-700"
+      : value === "เสร็จสิ้น"
+      ? "bg-sky-100 text-sky-800"
       : "bg-gray-100 text-gray-700";
   return (
     <span
@@ -91,6 +116,10 @@ const PayBadge = ({ value }) => {
       ? "bg-emerald-100 text-emerald-800"
       : value === "รอชำระ"
       ? "bg-rose-100 text-rose-800"
+      : value === "เสร็จสิ้น"
+      ? "bg-sky-100 text-sky-800"
+      : value === "ยกเลิก"
+      ? "bg-gray-200 text-gray-700"
       : "bg-gray-100 text-gray-700";
   return (
     <span
@@ -444,6 +473,16 @@ export default function AdminPage() {
     return map;
   }, [bookings]);
 
+  /* แผนที่รถ: key = plate || name */
+  const carMap = useMemo(() => {
+    const m = {};
+    cars.forEach((c) => {
+      const key = c.licensePlate || c.name;
+      m[key] = c;
+    });
+    return m;
+  }, [cars]);
+
   /* today summary (for employee card) */
   const todaySummary = useMemo(() => {
     const today = new Date();
@@ -469,6 +508,101 @@ export default function AdminPage() {
   const closeDetail = () => {
     setDetailOpen(false);
     setDetailItem(null);
+  };
+
+  /* ---- Edit Booking Modal ---- */
+  const [bkEditOpen, setBkEditOpen] = useState(false);
+  const [bkEditId, setBkEditId] = useState(null);
+  const [bkEditForm, setBkEditForm] = useState({
+    carKey: "",
+    carName: "",
+    carPlate: "",
+    pricePerDay: "",
+    pickupLocation: "",
+    pickupTime: "",
+    returnLocation: "",
+    returnTime: "",
+  });
+
+  const openBkEdit = (b) => {
+    const key = b.carPlate || b.carName;
+    setBkEditId(b.id);
+    setBkEditForm({
+      carKey: key,
+      carName: b.carName || "",
+      carPlate: b.carPlate || "",
+      pricePerDay: b.pricePerDay || "",
+      pickupLocation: b.pickupLocation || "",
+      pickupTime: isoToLocalInput(b.pickupTime),
+      returnLocation: b.returnLocation || "",
+      returnTime: isoToLocalInput(b.returnTime),
+    });
+    setBkEditOpen(true);
+  };
+  const closeBkEdit = () => {
+    setBkEditOpen(false);
+    setBkEditId(null);
+  };
+  const handleBkEditChange = (e) => {
+    const { name, value } = e.target;
+    if (name === "carKey") {
+      const car = carMap[value];
+      setBkEditForm((p) => ({
+        ...p,
+        carKey: value,
+        carName: car?.name || p.carName,
+        carPlate: car?.licensePlate || "",
+        pricePerDay: car?.pricePerDay ?? p.pricePerDay,
+      }));
+    } else {
+      setBkEditForm((p) => ({ ...p, [name]: value }));
+    }
+  };
+  const handleBkEditSubmit = (e) => {
+    e.preventDefault();
+    const pickISO = localInputToISO(bkEditForm.pickupTime);
+    const retISO = localInputToISO(bkEditForm.returnTime);
+    if (!pickISO || !retISO || new Date(retISO) <= new Date(pickISO)) {
+      alert("กรุณาตรวจสอบวันเวลา รับ/คืนรถ (คืนต้องช้ากว่ารับ)");
+      return;
+    }
+    setBookings((prev) =>
+      prev.map((x) =>
+        x.id === bkEditId
+          ? {
+              ...x,
+              carName: bkEditForm.carName,
+              carPlate: bkEditForm.carPlate,
+              pricePerDay: Number(bkEditForm.pricePerDay) || 0,
+              pickupLocation: bkEditForm.pickupLocation,
+              pickupTime: pickISO,
+              returnLocation: bkEditForm.returnLocation,
+              returnTime: retISO,
+            }
+          : x
+      )
+    );
+    closeBkEdit();
+  };
+
+  /* Helpers: ทำเครื่องหมายเสร็จสิ้น */
+  const markCompleted = (b) => {
+    // 1) เปลี่ยนสถานะการจองและชำระเงินให้เป็น "เสร็จสิ้น"
+    setBookings((prev) =>
+      prev.map((x) =>
+        x.id === b.id
+          ? { ...x, bookingStatus: "เสร็จสิ้น", paymentStatus: "เสร็จสิ้น" }
+          : x
+      )
+    );
+    // 2) เปลี่ยนสถานะรถเป็น "ซ่อมแซม"
+    setCars((prev) =>
+      prev.map((c) => {
+        const samePlate = b.carPlate && c.licensePlate === b.carPlate;
+        const sameName = !b.carPlate && b.carName && c.name === b.carName;
+        return samePlate || sameName ? { ...c, status: "ซ่อมแซม" } : c;
+      })
+    );
   };
 
   /* Mock employee */
@@ -710,6 +844,7 @@ export default function AdminPage() {
                   >
                     <option value="ว่าง">ว่าง</option>
                     <option value="ถูกยืมอยู่">ถูกยืมอยู่</option>
+                    <option value="ซ่อมแซม">ซ่อมแซม</option>
                   </select>
                 </div>
                 <div className="xl:col-span-4">
@@ -777,6 +912,7 @@ export default function AdminPage() {
                       <option>ทั้งหมด</option>
                       <option value="ว่าง">ว่าง</option>
                       <option value="ถูกยืมอยู่">ถูกยืมอยู่</option>
+                      <option value="ซ่อมแซม">ซ่อมแซม</option>
                     </select>
                   </div>
                   <button
@@ -808,7 +944,10 @@ export default function AdminPage() {
                     <tbody className="divide-y divide-gray-100">
                       {filteredCars.map((c) => {
                         const key = c.licensePlate || c.name;
-                        const nb = nextBookingMap[key];
+                        // ⬇️ หากสถานะรถเป็น "ซ่อมแซม" ให้ล้างจองถัดไปในตารางรถ
+                        const nb =
+                          c.status === "ซ่อมแซม" ? null : nextBookingMap[key];
+
                         return (
                           <tr key={c.id} className="align-middle">
                             <td className="py-3 pr-3 text-gray-700">{c.id}</td>
@@ -863,16 +1002,6 @@ export default function AdminPage() {
                           </tr>
                         );
                       })}
-                      {filteredCars.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={8}
-                            className="py-6 text-center text-gray-500"
-                          >
-                            ไม่พบรายการที่ตรงกับตัวกรอง
-                          </td>
-                        </tr>
-                      )}
                     </tbody>
                   </table>
                 </div>
@@ -922,6 +1051,7 @@ export default function AdminPage() {
                       <option>ยืนยันแล้ว</option>
                       <option>รอชำระ</option>
                       <option>ยกเลิก</option>
+                      <option>เสร็จสิ้น</option>
                     </select>
                   </div>
                   <div className="w-full sm:w-56">
@@ -941,6 +1071,8 @@ export default function AdminPage() {
                       <option>ทั้งหมด</option>
                       <option>ชำระแล้ว</option>
                       <option>รอชำระ</option>
+                      <option>ยกเลิก</option>
+                      <option>เสร็จสิ้น</option>
                     </select>
                   </div>
                   <button
@@ -1018,48 +1150,83 @@ export default function AdminPage() {
                               <BookingBadge value={b.bookingStatus} />
                             </td>
                             <td className="py-3 pr-3">
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  onClick={() => openBkEdit(b)}
+                                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
+                                >
+                                  แก้ไข
+                                </button>
                                 <button
                                   onClick={() => openDetail(b)}
-                                  className="px-3 py-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
+                                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
                                 >
-                                  ดูรายละเอียด
+                                  รายละเอียด
                                 </button>
-                                {b.paymentStatus !== "ชำระแล้ว" && (
-                                  <button
-                                    onClick={() =>
-                                      setBookings((prev) =>
-                                        prev.map((x) =>
-                                          x.id === b.id
-                                            ? {
-                                                ...x,
-                                                paymentStatus: "ชำระแล้ว",
-                                              }
-                                            : x
+
+                                {/* ทำเครื่องหมายชำระแล้ว → ชำระเงิน=ชำระแล้ว + (ถ้าไม่ยกเลิก/ไม่เสร็จสิ้น) ให้สถานะ=ยืนยันแล้ว */}
+                                {b.paymentStatus !== "ชำระแล้ว" &&
+                                  b.bookingStatus !== "ยกเลิก" &&
+                                  b.bookingStatus !== "เสร็จสิ้น" && (
+                                    <button
+                                      onClick={() =>
+                                        setBookings((prev) =>
+                                          prev.map((x) =>
+                                            x.id === b.id
+                                              ? {
+                                                  ...x,
+                                                  paymentStatus: "ชำระแล้ว",
+                                                  bookingStatus:
+                                                    x.bookingStatus ===
+                                                      "ยกเลิก" ||
+                                                    x.bookingStatus ===
+                                                      "เสร็จสิ้น"
+                                                      ? x.bookingStatus
+                                                      : "ยืนยันแล้ว",
+                                                }
+                                              : x
+                                          )
                                         )
-                                      )
-                                    }
-                                    className="px-3 py-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
-                                  >
-                                    ทำเครื่องหมายชำระแล้ว
-                                  </button>
-                                )}
-                                {b.bookingStatus !== "ยกเลิก" && (
-                                  <button
-                                    onClick={() =>
-                                      setBookings((prev) =>
-                                        prev.map((x) =>
-                                          x.id === b.id
-                                            ? { ...x, bookingStatus: "ยกเลิก" }
-                                            : x
+                                      }
+                                      className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
+                                    >
+                                      ชำระแล้ว
+                                    </button>
+                                  )}
+
+                                {/* ปุ่มเสร็จสิ้น → เซ็ตทั้งสองช่องเป็นเสร็จสิ้น และเปลี่ยนรถเป็นซ่อมแซม */}
+                                {b.bookingStatus !== "เสร็จสิ้น" &&
+                                  b.bookingStatus !== "ยกเลิก" && (
+                                    <button
+                                      onClick={() => markCompleted(b)}
+                                      className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
+                                    >
+                                      เสร็จสิ้น
+                                    </button>
+                                  )}
+
+                                {/* ยกเลิก → เซ็ตทั้งสองช่องเป็นยกเลิก */}
+                                {b.bookingStatus !== "ยกเลิก" &&
+                                  b.bookingStatus !== "เสร็จสิ้น" && (
+                                    <button
+                                      onClick={() =>
+                                        setBookings((prev) =>
+                                          prev.map((x) =>
+                                            x.id === b.id
+                                              ? {
+                                                  ...x,
+                                                  bookingStatus: "ยกเลิก",
+                                                  paymentStatus: "ยกเลิก",
+                                                }
+                                              : x
+                                          )
                                         )
-                                      )
-                                    }
-                                    className="px-3 py-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
-                                  >
-                                    ยกเลิก
-                                  </button>
-                                )}
+                                      }
+                                      className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
+                                    >
+                                      ยกเลิก
+                                    </button>
+                                  )}
                               </div>
                             </td>
                           </tr>
@@ -1249,6 +1416,7 @@ export default function AdminPage() {
                 >
                   <option value="ว่าง">ว่าง</option>
                   <option value="ถูกยืมอยู่">ถูกยืมอยู่</option>
+                  <option value="ซ่อมแซม">ซ่อมแซม</option>
                 </select>
               </div>
               <div className="md:col-span-6">
@@ -1301,7 +1469,7 @@ export default function AdminPage() {
               </button>
             </div>
 
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-black">
               <div>
                 <div>
                   ลูกค้า: <b>{detailItem.customerName}</b>
@@ -1326,7 +1494,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <div className="mt-3 text-sm">
+            <div className="mt-3 text-sm text-black">
               {(() => {
                 const c = computeTotal(detailItem);
                 return (
@@ -1338,11 +1506,13 @@ export default function AdminPage() {
                       <div>ส่วนลด: {fmtBaht(c.discount)} ฿</div>
                     </div>
                     <div>
-                      <div>มัดจำ: {fmtBaht(detailItem.deposit)} ฿</div>
-                      <div>
+                      <div className="mb-1">
+                        มัดจำ: {fmtBaht(detailItem.deposit)} ฿
+                      </div>
+                      <div className="mb-1">
                         ชำระเงิน: <PayBadge value={detailItem.paymentStatus} />
                       </div>
-                      <div>
+                      <div className="mb-1">
                         สถานะ: <BookingBadge value={detailItem.bookingStatus} />
                       </div>
                       <div className="font-semibold">
@@ -1354,42 +1524,204 @@ export default function AdminPage() {
               })()}
             </div>
 
-            <div className="mt-5 flex items-center justify-end gap-2">
-              {detailItem.bookingStatus !== "ยกเลิก" && (
-                <button
-                  onClick={() => {
-                    setBookings((prev) =>
-                      prev.map((x) =>
-                        x.id === detailItem.id
-                          ? { ...x, bookingStatus: "ยกเลิก" }
-                          : x
-                      )
-                    );
-                    closeDetail();
-                  }}
-                  className="px-4 py-2 rounded-lg border"
-                >
-                  ยกเลิกการจอง
-                </button>
-              )}
-              {detailItem.paymentStatus !== "ชำระแล้ว" && (
-                <button
-                  onClick={() => {
-                    setBookings((prev) =>
-                      prev.map((x) =>
-                        x.id === detailItem.id
-                          ? { ...x, paymentStatus: "ชำระแล้ว" }
-                          : x
-                      )
-                    );
-                    closeDetail();
-                  }}
-                  className="px-4 py-2 rounded-lg bg-black text-white"
-                >
-                  ทำเครื่องหมายชำระแล้ว
-                </button>
-              )}
+            <div className="mt-5 flex items-center justify-end gap-2 text-black">
+              {/* ยกเลิก = เซ็ตสองช่องเป็นยกเลิก */}
+              {detailItem.bookingStatus !== "ยกเลิก" &&
+                detailItem.bookingStatus !== "เสร็จสิ้น" && (
+                  <button
+                    onClick={() => {
+                      setBookings((prev) =>
+                        prev.map((x) =>
+                          x.id === detailItem.id
+                            ? {
+                                ...x,
+                                bookingStatus: "ยกเลิก",
+                                paymentStatus: "ยกเลิก",
+                              }
+                            : x
+                        )
+                      );
+                      closeDetail();
+                    }}
+                    className="px-4 py-2 rounded-lg border"
+                  >
+                    ยกเลิกการจอง
+                  </button>
+                )}
+
+              {/* ชำระแล้ว = ชำระเงิน:ชำระแล้ว + (ถ้าไม่ยกเลิก/ไม่เสร็จสิ้น) สถานะ:ยืนยันแล้ว */}
+              {detailItem.paymentStatus !== "ชำระแล้ว" &&
+                detailItem.bookingStatus !== "ยกเลิก" &&
+                detailItem.bookingStatus !== "เสร็จสิ้น" && (
+                  <button
+                    onClick={() => {
+                      setBookings((prev) =>
+                        prev.map((x) =>
+                          x.id === detailItem.id
+                            ? {
+                                ...x,
+                                paymentStatus: "ชำระแล้ว",
+                                bookingStatus:
+                                  x.bookingStatus === "ยกเลิก" ||
+                                  x.bookingStatus === "เสร็จสิ้น"
+                                    ? x.bookingStatus
+                                    : "ยืนยันแล้ว",
+                              }
+                            : x
+                        )
+                      );
+                      closeDetail();
+                    }}
+                    className="px-4 py-2 rounded-lg border"
+                  >
+                    ทำเครื่องหมายชำระแล้ว
+                  </button>
+                )}
+
+              {/* เสร็จสิ้น = เซ็ตสองช่องเป็นเสร็จสิ้น + รถ=ซ่อมแซม */}
+              {detailItem.bookingStatus !== "เสร็จสิ้น" &&
+                detailItem.bookingStatus !== "ยกเลิก" && (
+                  <button
+                    onClick={() => {
+                      markCompleted(detailItem);
+                      closeDetail();
+                    }}
+                    className="px-4 py-2 rounded-lg bg-black text-white"
+                  >
+                    ทำเครื่องหมายเสร็จสิ้น
+                  </button>
+                )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----- Modal แก้ไขการจอง ----- */}
+      {bkEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={closeBkEdit} />
+          <div className="relative z-10 w-full max-w-3xl bg-white rounded-xl shadow-xl p-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-black">แก้ไขการจอง</h3>
+              <button
+                onClick={closeBkEdit}
+                className="text-gray-500 hover:text-gray-700"
+                aria-label="ปิด"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleBkEditSubmit}
+              className="mt-4 grid grid-cols-1 md:grid-cols-6 gap-3 text-sm"
+            >
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  เลือกรถ
+                </label>
+                <select
+                  name="carKey"
+                  value={bkEditForm.carKey}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                >
+                  <option value="">— เลือกรถ —</option>
+                  {cars.map((c) => {
+                    const key = c.licensePlate || c.name;
+                    return (
+                      <option key={key} value={key}>
+                        {c.name} {c.licensePlate ? `(${c.licensePlate})` : ""} —{" "}
+                        {fmtBaht(c.pricePerDay)}฿/วัน
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  ราคา/วัน (บาท)
+                </label>
+                <input
+                  type="number"
+                  name="pricePerDay"
+                  min="0"
+                  value={bkEditForm.pricePerDay}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
+                />
+              </div>
+
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  สถานที่รับรถ
+                </label>
+                <input
+                  type="text"
+                  name="pickupLocation"
+                  value={bkEditForm.pickupLocation}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  สถานที่คืนรถ
+                </label>
+                <input
+                  type="text"
+                  name="returnLocation"
+                  value={bkEditForm.returnLocation}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                />
+              </div>
+
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  วัน–เวลา รับรถ
+                </label>
+                <input
+                  type="datetime-local"
+                  name="pickupTime"
+                  value={bkEditForm.pickupTime}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  วัน–เวลา คืนรถ
+                </label>
+                <input
+                  type="datetime-local"
+                  name="returnTime"
+                  value={bkEditForm.returnTime}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                />
+              </div>
+
+              <div className="md:col-span-6 text-xs text-gray-500">
+                ระบบจะคำนวณ “วันเช่า/รวมสุทธิ” ใหม่อัตโนมัติหลังบันทึก
+              </div>
+
+              <div className="md:col-span-6 flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeBkEdit}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2 rounded-lg bg-black text-white font-semibold hover:bg-gray-800 transition"
+                >
+                  บันทึกการเปลี่ยนแปลง
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
