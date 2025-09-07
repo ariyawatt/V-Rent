@@ -1,7 +1,7 @@
 // app/admin/page.js
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import Headers from "@/Components/HeaderAd";
 import Footer from "@/Components/Footer";
 
@@ -24,6 +24,38 @@ function diffDays(pickupISO, returnISO) {
     return 1;
   }
 }
+
+/* ★ NEW: คำนวณสถานะที่จะแสดงในตารางรถจากการจองปัจจุบัน */
+/* ใช้คำนวณสถานะที่จะโชว์ใน "ตารางรถ" โดยอ้างอิงจากตารางการจอง */
+function getCarRowStatus(car, bookings, now = new Date()) {
+  const key = car.licensePlate || car.name;
+  const related = bookings.filter((b) => (b.carPlate || b.carName) === key);
+
+  const hasReturnOverdue = related.some(
+    (b) => getLifecycle(b, now) === LIFECYCLE.RETURN_OVERDUE
+  );
+  if (hasReturnOverdue) return "เลยกำหนดส่ง";
+
+  const hasPickupOverdue = related.some(
+    (b) => getLifecycle(b, now) === LIFECYCLE.PICKUP_OVERDUE
+  );
+  if (hasPickupOverdue) return "เลยกำหนดรับ";
+
+  const hasInUse = related.some(
+    (b) => getLifecycle(b, now) === LIFECYCLE.IN_USE
+  );
+  if (hasInUse) return "ถูกยืมอยู่";
+
+  const hasPaidWaitPickup = related.some(
+    (b) =>
+      b.paymentStatus === "ชำระแล้ว" &&
+      getLifecycle(b, now) === LIFECYCLE.WAIT_PICKUP
+  );
+  if (hasPaidWaitPickup) return "รอส่ง";
+
+  return car.status;
+}
+
 const sumExtras = (extras = []) =>
   extras.reduce((t, e) => t + Number(e?.price || 0), 0);
 
@@ -51,8 +83,6 @@ function fmtDateTime(iso) {
   const mm = String(d.getMinutes()).padStart(2, "0");
   return `${y}-${m}-${dd} ${hh}:${mm}`;
 }
-
-/* เพิ่ม util สำหรับ input type="datetime-local" */
 function isoToLocalInput(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -63,8 +93,50 @@ function isoToLocalInput(iso) {
 }
 function localInputToISO(localStr) {
   if (!localStr) return "";
-  const d = new Date(localStr); // local time -> Date
+  const d = new Date(localStr);
   return d.toISOString();
+}
+
+/* ───────────── Booking Lifecycle ───────────── */
+const LIFECYCLE = {
+  WAIT_PAYMENT: "รอชำระ",
+  WAIT_PICKUP: "รอรับ",
+  PICKUP_OVERDUE: "เลยกำหนดรับ",
+  IN_USE: "กำลังเช่า",
+  RETURN_OVERDUE: "เลยกำหนดคืน",
+  DONE: "เสร็จสิ้น",
+  CANCELLED: "ยกเลิก",
+};
+
+function getLifecycle(b, now = new Date()) {
+  // terminal states
+  if (b.bookingStatus === "ยกเลิก") return LIFECYCLE.CANCELLED;
+  if (b.bookingStatus === "เสร็จสิ้น" || b.returnedAt) return LIFECYCLE.DONE;
+
+  const pickup = b.pickupTime ? new Date(b.pickupTime) : null;
+  const drop = b.returnTime ? new Date(b.returnTime) : null;
+
+  // ระหว่างใช้งาน
+  if (b.pickedUpAt && !b.returnedAt) {
+    if (drop && now > drop) return LIFECYCLE.RETURN_OVERDUE;
+    return LIFECYCLE.IN_USE;
+  }
+
+  // ยังไม่รับรถ
+  if (!b.pickedUpAt) {
+    // ✅ ใหม่: ถ้ายัง "รอชำระ" ให้เป็น WAIT_PAYMENT เสมอ (ไม่ว่าเวลารับจะผ่านแล้วหรือยัง)
+    if (b.paymentStatus !== "ชำระแล้ว") return LIFECYCLE.WAIT_PAYMENT;
+
+    // จ่ายแล้ว → ค่อยพิจารณาเลยกำหนดรับ/รอรับ
+    if (pickup && now > pickup) return LIFECYCLE.PICKUP_OVERDUE;
+    return LIFECYCLE.WAIT_PICKUP;
+  }
+
+  return LIFECYCLE.WAIT_PAYMENT;
+}
+
+function isOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
 }
 
 /* ───────────── Badges ───────────── */
@@ -76,7 +148,14 @@ const StatusBadge = ({ value }) => {
       ? "bg-red-100 text-red-800"
       : value === "ซ่อมแซม"
       ? "bg-amber-100 text-amber-800"
+      : value === "รอส่ง" // ✅ ชำระแล้ว + รอรับ
+      ? "bg-blue-100 text-blue-800"
+      : value === "เลยกำหนดรับ" // ✅ pickup overdue
+      ? "bg-orange-100 text-orange-800"
+      : value === "เลยกำหนดส่ง" // ✅ return overdue
+      ? "bg-rose-100 text-rose-800"
       : "bg-gray-100 text-gray-700";
+
   return (
     <span
       className={cls(
@@ -88,12 +167,17 @@ const StatusBadge = ({ value }) => {
     </span>
   );
 };
+
 const BookingBadge = ({ value }) => {
   const map =
-    value === "ยืนยันแล้ว"
+    value === "ยืนยันแล้ว" || value === "รอรับ"
       ? "bg-emerald-100 text-emerald-800"
       : value === "รอชำระ"
       ? "bg-amber-100 text-amber-800"
+      : value === "กำลังเช่า"
+      ? "bg-indigo-100 text-indigo-800"
+      : value === "เลยกำหนดรับ" || value === "เลยกำหนดคืน"
+      ? "bg-rose-100 text-rose-800"
       : value === "ยกเลิก"
       ? "bg-gray-200 text-gray-700"
       : value === "เสร็จสิ้น"
@@ -135,7 +219,15 @@ const PayBadge = ({ value }) => {
 
 /* ───────────── Page ───────────── */
 export default function AdminPage() {
+  /* clock for lifecycle */
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
   /* ---- Cars ---- */
+  /* ---- Cars (synced with bookings below) ---- */
   const initialCars = useMemo(
     () => [
       {
@@ -194,12 +286,96 @@ export default function AdminPage() {
         year: 2021,
         description: "SUV สมดุลย์ดี",
       },
+      {
+        id: 5,
+        name: "Toyota Hiace",
+        brand: "Toyota",
+        type: "Van",
+        pricePerDay: 2200,
+        status: "ว่าง",
+        transmission: "อัตโนมัติ",
+        licensePlate: "ฮย 7777",
+        seats: 11,
+        fuel: "ดีเซล",
+        year: 2020,
+        description: "เหมาะทริปครอบครัว",
+      },
+      {
+        id: 6,
+        name: "Honda Civic",
+        brand: "Honda",
+        type: "Sedan",
+        pricePerDay: 1400,
+        status: "ว่าง",
+        transmission: "อัตโนมัติ",
+        licensePlate: "ฮค 4444",
+        seats: 5,
+        fuel: "เบนซิน",
+        year: 2022,
+        description: "ซีดานยอดนิยม",
+      },
+      {
+        id: 7,
+        name: "Toyota Fortuner",
+        brand: "Toyota",
+        type: "SUV",
+        pricePerDay: 2400,
+        status: "ว่าง",
+        transmission: "อัตโนมัติ",
+        licensePlate: "ฟท 1111",
+        seats: 7,
+        fuel: "ดีเซล",
+        year: 2023,
+        description: "PPV นั่งสบาย ลุยได้",
+      },
+      {
+        id: 8,
+        name: "Isuzu D-Max",
+        brand: "Isuzu",
+        type: "Pickup",
+        pricePerDay: 1600,
+        status: "ว่าง",
+        transmission: "ธรรมดา",
+        licensePlate: "ดม 2345",
+        seats: 5,
+        fuel: "ดีเซล",
+        year: 2021,
+        description: "กระบะงานบรรทุก",
+      },
+      {
+        id: 9,
+        name: "MG4 Electric",
+        brand: "MG",
+        type: "Hatchback",
+        pricePerDay: 1800,
+        status: "ว่าง",
+        transmission: "อัตโนมัติ",
+        licensePlate: "อีวี 8888",
+        seats: 5,
+        fuel: "ไฟฟ้า (EV)",
+        year: 2024,
+        description: "EV คุ้มค่า",
+      },
+      {
+        id: 10,
+        name: "BMW 5 Series",
+        brand: "BMW",
+        type: "Sedan",
+        pricePerDay: 3500,
+        status: "ว่าง",
+        transmission: "อัตโนมัติ",
+        licensePlate: "บม 5005",
+        seats: 5,
+        fuel: "ไฮบริด",
+        year: 2022,
+        description: "พรีเมียมสำหรับผู้บริหาร",
+      },
     ],
     []
   );
   const [cars, setCars] = useState(initialCars);
 
-  /* Filters (Cars) */
+  /* car filters */
   const [filters, setFilters] = useState({ q: "", status: "ทั้งหมด" });
   const onFilterChange = (e) => {
     const { name, value } = e.target;
@@ -218,7 +394,7 @@ export default function AdminPage() {
     });
   }, [cars, filters]);
 
-  /* Add car form */
+  /* add car form */
   const fileRef = useRef(null);
   const [form, setForm] = useState({
     name: "",
@@ -232,7 +408,7 @@ export default function AdminPage() {
     fuel: "เบนซิน",
     year: "",
     description: "",
-    imageData: "", // ⬅️ เก็บ Base64 ของรูปรถ
+    imageData: "",
   });
   const handleFormChange = (e) => {
     const { name, value } = e.target;
@@ -270,10 +446,9 @@ export default function AdminPage() {
       fuel: form.fuel,
       year: form.year ? Number(form.year) : undefined,
       description: form.description,
-      imageData: form.imageData || "", // ⬅️ แนบรูปเข้าออบเจ็กต์รถ
+      imageData: form.imageData || "",
     };
     setCars((prev) => [newCar, ...prev]);
-    // reset
     setForm({
       name: "",
       brand: "",
@@ -297,7 +472,7 @@ export default function AdminPage() {
     }
   };
 
-  /* Edit car modal */
+  /* edit car modal */
   const [editOpen, setEditOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editForm, setEditForm] = useState({
@@ -368,80 +543,315 @@ export default function AdminPage() {
   };
 
   /* ---- Bookings ---- */
+  /* ---- Bookings (cover all lifecycle cases & in sync with cars) ---- */
   const initialBookings = useMemo(
     () => [
+      /* WAIT_PICKUP (ชำระแล้ว รอรับในอนาคต) — Corolla */
       {
-        id: "VR-2025-000123",
-        bookingCode: "VR-2025-000123",
-        customerName: "คุณเอ",
-        customerPhone: "080-000-0000",
+        id: "VR-2025-1001",
+        bookingCode: "VR-2025-1001",
+        customerName: "คุณหนึ่ง",
+        customerPhone: "080-111-0001",
         verifyType: "บัตรประชาชน",
         carName: "Toyota Corolla Cross",
         carPlate: "1กข 1234",
         pricePerDay: 1800,
         pickupLocation: "สนามบินเชียงใหม่ (CNX)",
-        pickupTime: toISO("2025-09-07T10:00:00"),
+        pickupTime: toISO("2025-09-10T10:00:00"),
         returnLocation: "สาขาสีลม",
-        returnTime: toISO("2025-09-15T12:00:00"),
+        returnTime: toISO("2025-09-12T12:00:00"),
         extras: [{ name: "คาร์ซีท", price: 100 }],
-        discount: 200,
-        deposit: 5000,
+        discount: 0,
+        deposit: 0,
         paymentStatus: "ชำระแล้ว",
         bookingStatus: "ยืนยันแล้ว",
+        pickedUpAt: "",
+        returnedAt: "",
         channel: "Web",
         createdAt: toISO("2025-09-06T09:10:00"),
-        notes: "ไฟลท์มาถึง 09:20",
+        notes: "",
+        slipImage: "",
       },
+
+      /* WAIT_PAYMENT (ยังไม่ชำระ อนาคต) — Civic */
       {
-        id: "VR-2025-000124",
-        bookingCode: "VR-2025-000124",
-        customerName: "คุณบี",
-        customerPhone: "081-111-2222",
+        id: "VR-2025-1002",
+        bookingCode: "VR-2025-1002",
+        customerName: "คุณสอง",
+        customerPhone: "081-222-0002",
         verifyType: "ใบขับขี่",
-        carName: "Mazda CX-5",
-        carPlate: "ขน 2025",
-        pricePerDay: 1700,
+        carName: "Honda Civic",
+        carPlate: "ฮค 4444",
+        pricePerDay: 1400,
         pickupLocation: "สาขาสีลม",
-        pickupTime: toISO("2025-09-08T09:00:00"),
+        pickupTime: toISO("2025-09-09T09:00:00"),
         returnLocation: "สาขาสีลม",
-        returnTime: toISO("2025-09-09T09:00:00"),
+        returnTime: toISO("2025-09-10T09:00:00"),
         extras: [],
         discount: 0,
-        deposit: 3000,
+        deposit: 0,
         paymentStatus: "รอชำระ",
         bookingStatus: "รอชำระ",
+        pickedUpAt: "",
+        returnedAt: "",
         channel: "LINE",
         createdAt: toISO("2025-09-08T08:30:00"),
-        notes: "",
+        notes: "รอตรวจสอบ",
+        slipImage: "",
       },
+
+      /* IN_USE (กำลังเช่า) — Fortuner */
       {
-        id: "VR-2025-000125",
-        bookingCode: "VR-2025-000125",
-        customerName: "คุณซี",
-        customerPhone: "082-333-4444",
+        id: "VR-2025-1003",
+        bookingCode: "VR-2025-1003",
+        customerName: "คุณสาม",
+        customerPhone: "082-333-0003",
         verifyType: "Passport",
-        carName: "Nissan Skyline R34",
-        carPlate: "กท 9999",
-        pricePerDay: 2000,
+        carName: "Toyota Fortuner",
+        carPlate: "ฟท 1111",
+        pricePerDay: 2400,
         pickupLocation: "สาขาสีลม",
         pickupTime: toISO("2025-09-07T14:00:00"),
         returnLocation: "สาขาสีลม",
         returnTime: toISO("2025-09-12T12:00:00"),
         extras: [{ name: "GPS", price: 60 }],
         discount: 0,
-        deposit: 5000,
-        paymentStatus: "รอชำระ",
-        bookingStatus: "รอชำระ",
+        deposit: 0,
+        paymentStatus: "ชำระแล้ว",
+        bookingStatus: "ยืนยันแล้ว",
+        pickedUpAt: toISO("2025-09-07T14:05:00"),
+        returnedAt: "",
         channel: "Call",
         createdAt: toISO("2025-09-05T11:00:00"),
-        notes: "ลูกค้าขอรับรถไวได้ถ้ามี",
+        notes: "ลูกค้าขับออก 14:10",
+        slipImage: "",
+      },
+
+      /* RETURN_OVERDUE (เลยกำหนดคืน) — D-Max */
+      {
+        id: "VR-2025-1004",
+        bookingCode: "VR-2025-1004",
+        customerName: "คุณสี่",
+        customerPhone: "083-444-0004",
+        verifyType: "บัตรประชาชน",
+        carName: "Isuzu D-Max",
+        carPlate: "ดม 2345",
+        pricePerDay: 1600,
+        pickupLocation: "สาขาสีลม",
+        pickupTime: toISO("2025-09-04T10:00:00"),
+        returnLocation: "สาขาสีลม",
+        returnTime: toISO("2025-09-07T10:00:00"),
+        extras: [],
+        discount: 0,
+        deposit: 0,
+        paymentStatus: "ชำระแล้ว",
+        bookingStatus: "ยืนยันแล้ว",
+        pickedUpAt: toISO("2025-09-04T10:05:00"),
+        returnedAt: "",
+        channel: "Web",
+        createdAt: toISO("2025-09-03T09:10:00"),
+        notes: "เลยกำหนด 1 วัน",
+        slipImage: "",
+      },
+
+      /* CANCELLED — Hiace */
+      {
+        id: "VR-2025-1005",
+        bookingCode: "VR-2025-1005",
+        customerName: "คุณห้า",
+        customerPhone: "084-555-0005",
+        verifyType: "บัตรประชาชน",
+        carName: "Toyota Hiace",
+        carPlate: "ฮย 7777",
+        pricePerDay: 2200,
+        pickupLocation: "สาขาสีลม",
+        pickupTime: toISO("2025-09-09T09:00:00"),
+        returnLocation: "สาขาสีลม",
+        returnTime: toISO("2025-09-11T12:00:00"),
+        extras: [],
+        discount: 0,
+        deposit: 0,
+        paymentStatus: "ยกเลิก",
+        bookingStatus: "ยกเลิก",
+        pickedUpAt: "",
+        returnedAt: "",
+        channel: "Walk-in",
+        createdAt: toISO("2025-09-08T10:00:00"),
+        notes: "ยกเลิกตามลูกค้าร้องขอ",
+        slipImage: "",
+      },
+
+      /* DONE — CX-5 */
+      {
+        id: "VR-2025-1006",
+        bookingCode: "VR-2025-1006",
+        customerName: "คุณหก",
+        customerPhone: "085-666-0006",
+        verifyType: "Passport",
+        carName: "Mazda CX-5",
+        carPlate: "ขน 2025",
+        pricePerDay: 1700,
+        pickupLocation: "สาขาสีลม",
+        pickupTime: toISO("2025-09-01T09:00:00"),
+        returnLocation: "สาขาสีลม",
+        returnTime: toISO("2025-09-03T09:00:00"),
+        extras: [],
+        discount: 0,
+        deposit: 0,
+        paymentStatus: "เสร็จสิ้น",
+        bookingStatus: "เสร็จสิ้น",
+        pickedUpAt: toISO("2025-09-01T09:05:00"),
+        returnedAt: toISO("2025-09-03T09:10:00"),
+        channel: "Web",
+        createdAt: toISO("2025-08-31T15:00:00"),
+        notes: "",
+        slipImage: "",
+      },
+
+      /* FUTURE #2 ของ Corolla (WAIT_PAYMENT) — ตรวจว่า next-booking เลือกอันใกล้สุด (ยังคงควรเป็น VR-2025-1001) */
+
+      /* PICKUP_OVERDUE (เลยกำหนดรับ) — Evolution */
+      {
+        id: "VR-2025-1009",
+        bookingCode: "VR-2025-1009",
+        customerName: "คุณเก้า",
+        customerPhone: "088-999-0009",
+        verifyType: "บัตรประชาชน",
+        carName: "Mitsubishi Evolution",
+        carPlate: "2ขค 5678",
+        pricePerDay: 1500,
+        pickupLocation: "สาขาสีลม",
+        pickupTime: toISO("2025-09-07T08:00:00"),
+        returnLocation: "สาขาสีลม",
+        returnTime: toISO("2025-09-09T08:00:00"),
+        extras: [],
+        discount: 0,
+        deposit: 0,
+        paymentStatus: "รอชำระ",
+        bookingStatus: "รอชำระ",
+        pickedUpAt: "", // ไม่มารับ → กลายเป็น "เลยกำหนดรับ"
+        returnedAt: "",
+        channel: "LINE",
+        createdAt: toISO("2025-09-06T13:00:00"),
+        notes: "ยังติดต่อไม่ได้",
+        slipImage: "",
+      },
+
+      /* WAIT_PICKUP + มีสลิป (แสดงในรายละเอียด) — R34 */
+      {
+        id: "VR-2025-1010",
+        bookingCode: "VR-2025-1010",
+        customerName: "คุณสิบ",
+        customerPhone: "089-000-0010",
+        verifyType: "Passport",
+        carName: "Nissan Skyline R34",
+        carPlate: "กท 9999",
+        pricePerDay: 2000,
+        pickupLocation: "สาขาสีลม",
+        pickupTime: toISO("2025-09-09T16:00:00"),
+        returnLocation: "สาขาสีลม",
+        returnTime: toISO("2025-09-11T12:00:00"),
+        extras: [],
+        discount: 0,
+        deposit: 0,
+        paymentStatus: "ชำระแล้ว",
+        bookingStatus: "ยืนยันแล้ว",
+        pickedUpAt: "",
+        returnedAt: "",
+        channel: "Web",
+        createdAt: toISO("2025-09-08T10:30:00"),
+        notes: "แนบสลิปแล้ว",
+        // transparent 1x1 PNG (เล็กมาก ใช้เป็น mock ได้)
+        slipImage:
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII=",
+      },
+
+      /* WAIT_PAYMENT — BMW */
+      {
+        id: "VR-2025-1011",
+        bookingCode: "VR-2025-1011",
+        customerName: "คุณสิบเอ็ด",
+        customerPhone: "089-111-0011",
+        verifyType: "บัตรประชาชน",
+        carName: "BMW 5 Series",
+        carPlate: "บม 5005",
+        pricePerDay: 3500,
+        pickupLocation: "สาขาสีลม",
+        pickupTime: toISO("2025-09-25T10:00:00"),
+        returnLocation: "สาขาสีลม",
+        returnTime: toISO("2025-09-28T12:00:00"),
+        extras: [],
+        discount: 0,
+        deposit: 0,
+        paymentStatus: "รอชำระ",
+        bookingStatus: "รอชำระ",
+        pickedUpAt: "",
+        returnedAt: "",
+        channel: "Walk-in",
+        createdAt: toISO("2025-09-08T12:00:00"),
+        notes: "",
+        slipImage: "",
+      },
+
+      /* CANCELLED — MG4 */
+      {
+        id: "VR-2025-1013",
+        bookingCode: "VR-2025-1013",
+        customerName: "คุณสิบสาม",
+        customerPhone: "089-333-0013",
+        verifyType: "บัตรประชาชน",
+        carName: "MG4 Electric",
+        carPlate: "อีวี 8888",
+        pricePerDay: 1800,
+        pickupLocation: "สนามบินเชียงใหม่ (CNX)",
+        pickupTime: toISO("2025-09-09T12:00:00"),
+        returnLocation: "สนามบินเชียงใหม่ (CNX)",
+        returnTime: toISO("2025-09-11T12:00:00"),
+        extras: [],
+        discount: 0,
+        deposit: 0,
+        paymentStatus: "ยกเลิก",
+        bookingStatus: "ยกเลิก",
+        pickedUpAt: "",
+        returnedAt: "",
+        channel: "Web",
+        createdAt: toISO("2025-09-08T07:50:00"),
+        notes: "ยกเลิกโดยลูกค้า",
+        slipImage: "",
+      },
+
+      /* FUTURE หลังจากงานเก่า (CX-5) — ให้มี “จองถัดไป” โชว์ */
+      {
+        id: "VR-2025-1014",
+        bookingCode: "VR-2025-1014",
+        customerName: "คุณสิบสี่",
+        customerPhone: "089-444-0014",
+        verifyType: "บัตรประชาชน",
+        carName: "Mazda CX-5",
+        carPlate: "ขน 2025",
+        pricePerDay: 1700,
+        pickupLocation: "สาขาสีลม",
+        pickupTime: toISO("2025-09-20T09:00:00"),
+        returnLocation: "สาขาสีลม",
+        returnTime: toISO("2025-09-23T12:00:00"),
+        extras: [],
+        discount: 0,
+        deposit: 0,
+        paymentStatus: "ชำระแล้ว",
+        bookingStatus: "ยืนยันแล้ว",
+        pickedUpAt: "",
+        returnedAt: "",
+        channel: "Web",
+        createdAt: toISO("2025-09-08T13:00:00"),
+        notes: "",
+        slipImage: "",
       },
     ],
     []
   );
   const [bookings, setBookings] = useState(initialBookings);
 
-  /* Filters (Bookings) */
+  /* booking filters */
   const [bkFilter, setBkFilter] = useState({
     q: "",
     bookingStatus: "ทั้งหมด",
@@ -475,12 +885,20 @@ export default function AdminPage() {
     });
   }, [bookings, bkFilter]);
 
-  /* next booking per car (for car table) */
+  /* next booking per car */
   const nextBookingMap = useMemo(() => {
     const map = {};
-    const now = new Date();
     bookings.forEach((b) => {
-      if (b.bookingStatus === "ยกเลิก") return;
+      const lc = getLifecycle(b, now);
+      if (
+        [
+          LIFECYCLE.CANCELLED,
+          LIFECYCLE.DONE,
+          LIFECYCLE.IN_USE,
+          LIFECYCLE.PICKUP_OVERDUE,
+        ].includes(lc)
+      )
+        return;
       const p = new Date(b.pickupTime);
       if (p >= now) {
         const key = b.carPlate || b.carName;
@@ -489,9 +907,9 @@ export default function AdminPage() {
       }
     });
     return map;
-  }, [bookings]);
+  }, [bookings, now]);
 
-  /* แผนที่รถ: key = plate || name */
+  /* carMap */
   const carMap = useMemo(() => {
     const m = {};
     cars.forEach((c) => {
@@ -501,38 +919,34 @@ export default function AdminPage() {
     return m;
   }, [cars]);
 
-  /* today summary (for employee card) */
-  // helper: การจองที่ยังต้องปฏิบัติงานอยู่
-  const isActiveBooking = (b) =>
-    b?.bookingStatus !== "ยกเลิก" &&
-    b?.bookingStatus !== "ชำระแล้ว" &&
-    b?.bookingStatus !== "ยืนยันแล้ว" &&
-    b?.bookingStatus !== "เสร็จสิ้น";
-
+  /* summary */
   const todaySummary = useMemo(() => {
-    const today = new Date();
-    const pickups = bookings.filter(
-      (b) =>
-        isActiveBooking(b) &&
+    const pickups = bookings.filter((b) => {
+      const lc = getLifecycle(b, now);
+      return (
+        (lc === LIFECYCLE.WAIT_PICKUP || lc === LIFECYCLE.PICKUP_OVERDUE) &&
         b.pickupTime &&
-        sameDate(new Date(b.pickupTime), today)
-    ).length;
+        sameDate(new Date(b.pickupTime), now)
+      );
+    }).length;
 
-    const returns = bookings.filter(
-      (b) =>
-        isActiveBooking(b) &&
+    const returns = bookings.filter((b) => {
+      const lc = getLifecycle(b, now);
+      return (
+        (lc === LIFECYCLE.IN_USE || lc === LIFECYCLE.RETURN_OVERDUE) &&
         b.returnTime &&
-        sameDate(new Date(b.returnTime), today)
-    ).length;
+        sameDate(new Date(b.returnTime), now)
+      );
+    }).length;
 
     const pendingPay = bookings.filter(
-      (b) => isActiveBooking(b) && b.paymentStatus === "รอชำระ"
+      (b) => getLifecycle(b, now) === LIFECYCLE.WAIT_PAYMENT
     ).length;
 
     return { pickups, returns, pendingPay };
-  }, [bookings]);
+  }, [bookings, now]);
 
-  /* Detail modal (booking) */
+  /* Detail modal */
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailItem, setDetailItem] = useState(null);
   const openDetail = (b) => {
@@ -544,10 +958,91 @@ export default function AdminPage() {
     setDetailItem(null);
   };
 
-  /* ---- Edit Booking Modal ---- */
+  /* ---- Handlers (ครบทุกสถานการณ์) ---- */
+  const handleMarkPaid = (b) => {
+    setBookings((prev) =>
+      prev.map((x) =>
+        x.id === b.id
+          ? {
+              ...x,
+              paymentStatus: "ชำระแล้ว",
+              bookingStatus:
+                x.bookingStatus === "ยกเลิก" || x.bookingStatus === "เสร็จสิ้น"
+                  ? x.bookingStatus
+                  : "ยืนยันแล้ว",
+            }
+          : x
+      )
+    );
+  };
+
+  const handleConfirmPickup = (b) => {
+    const nowISO = new Date().toISOString();
+    setBookings((prev) =>
+      prev.map((x) =>
+        x.id === b.id
+          ? {
+              ...x,
+              pickedUpAt: nowISO,
+              // ถ้าไม่ได้ชำระ ก็ยังปล่อยให้เป็น "รอชำระ" ได้ แต่สถานะการใช้งานจะเป็น "กำลังเช่า" จาก lifecycle
+            }
+          : x
+      )
+    );
+    // อัปเดตรถเป็น "ถูกยืมอยู่"
+    setCars((prev) =>
+      prev.map((c) => {
+        const samePlate = b.carPlate && c.licensePlate === b.carPlate;
+        const sameName = !b.carPlate && b.carName && c.name === b.carName;
+        return samePlate || sameName ? { ...c, status: "ถูกยืมอยู่" } : c;
+      })
+    );
+  };
+
+  const markCompleted = (b) => {
+    setBookings((prev) =>
+      prev.map((x) =>
+        x.id === b.id
+          ? {
+              ...x,
+              bookingStatus: "เสร็จสิ้น",
+              paymentStatus: "เสร็จสิ้น",
+              returnedAt: toISO(new Date()),
+            }
+          : x
+      )
+    );
+    setCars((prev) =>
+      prev.map((c) => {
+        const samePlate = b.carPlate && c.licensePlate === b.carPlate;
+        const sameName = !b.carPlate && b.carName && c.name === b.carName;
+        return samePlate || sameName ? { ...c, status: "ซ่อมแซม" } : c;
+      })
+    );
+  };
+
+  const handleCancel = (b) => {
+    setBookings((prev) =>
+      prev.map((x) =>
+        x.id === b.id
+          ? {
+              ...x,
+              bookingStatus: "ยกเลิก",
+              paymentStatus: "ยกเลิก",
+            }
+          : x
+      )
+    );
+  };
+
+  /* ---- Edit Booking Modal (เต็มรูปแบบ + อัปโหลดสลิป) ---- */
   const [bkEditOpen, setBkEditOpen] = useState(false);
   const [bkEditId, setBkEditId] = useState(null);
   const [bkEditForm, setBkEditForm] = useState({
+    bookingCode: "",
+    customerName: "",
+    customerPhone: "",
+    verifyType: "",
     carKey: "",
     carName: "",
     carPlate: "",
@@ -556,12 +1051,28 @@ export default function AdminPage() {
     pickupTime: "",
     returnLocation: "",
     returnTime: "",
+    discount: "",
+    deposit: "",
+    channel: "",
+    notes: "",
+    paymentStatus: "รอชำระ",
+    bookingStatus: "รอชำระ",
+    extrasText: "", // name:price ต่อบรรทัด
+    slipImage: "",
   });
+  const slipRef = useRef(null);
 
   const openBkEdit = (b) => {
     const key = b.carPlate || b.carName;
+    const extrasText = (b.extras || [])
+      .map((e) => `${e.name ?? ""}:${e.price ?? 0}`)
+      .join("\n");
     setBkEditId(b.id);
     setBkEditForm({
+      bookingCode: b.bookingCode || "",
+      customerName: b.customerName || "",
+      customerPhone: b.customerPhone || "",
+      verifyType: b.verifyType || "",
       carKey: key,
       carName: b.carName || "",
       carPlate: b.carPlate || "",
@@ -570,12 +1081,21 @@ export default function AdminPage() {
       pickupTime: isoToLocalInput(b.pickupTime),
       returnLocation: b.returnLocation || "",
       returnTime: isoToLocalInput(b.returnTime),
+      discount: b.discount ?? "",
+      deposit: b.deposit ?? "",
+      channel: b.channel || "",
+      notes: b.notes || "",
+      paymentStatus: b.paymentStatus || "รอชำระ",
+      bookingStatus: b.bookingStatus || "รอชำระ",
+      extrasText,
+      slipImage: b.slipImage || "",
     });
     setBkEditOpen(true);
   };
   const closeBkEdit = () => {
     setBkEditOpen(false);
     setBkEditId(null);
+    if (slipRef.current) slipRef.current.value = "";
   };
   const handleBkEditChange = (e) => {
     const { name, value } = e.target;
@@ -592,6 +1112,29 @@ export default function AdminPage() {
       setBkEditForm((p) => ({ ...p, [name]: value }));
     }
   };
+  const handleSlipChange = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) {
+      setBkEditForm((p) => ({ ...p, slipImage: "" }));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setBkEditForm((p) => ({ ...p, slipImage: String(reader.result || "") }));
+    };
+    reader.readAsDataURL(f);
+  };
+  const parseExtras = (text) => {
+    const lines = (text || "")
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const arr = lines.map((ln) => {
+      const [name, price] = ln.split(":");
+      return { name: (name || "").trim(), price: Number(price || 0) };
+    });
+    return arr;
+  };
   const handleBkEditSubmit = (e) => {
     e.preventDefault();
     const pickISO = localInputToISO(bkEditForm.pickupTime);
@@ -600,11 +1143,40 @@ export default function AdminPage() {
       alert("กรุณาตรวจสอบวันเวลา รับ/คืนรถ (คืนต้องช้ากว่ารับ)");
       return;
     }
+
+    // กันซ้อนช่วงเวลา
+    const carKey =
+      bkEditForm.carPlate || bkEditForm.carName || bkEditForm.carKey;
+    const overlaps = bookings.some((x) => {
+      if (x.id === bkEditId) return false;
+      const sameCar = (x.carPlate || x.carName) === carKey;
+      const lc = getLifecycle(x, now);
+      if (!sameCar) return false;
+      if ([LIFECYCLE.CANCELLED, LIFECYCLE.DONE].includes(lc)) return false;
+      const aStart = new Date(pickISO);
+      const aEnd = new Date(retISO);
+      const bStart = new Date(x.pickupTime);
+      const bEnd = new Date(x.returnTime);
+      return isOverlap(aStart, aEnd, bStart, bEnd);
+    });
+    if (overlaps) {
+      alert(
+        "ช่วงเวลานี้มีการจองซ้อนสำหรับรถคันนี้ กรุณาเลือกเวลาอื่นหรือเปลี่ยนคัน"
+      );
+      return;
+    }
+
+    const extras = parseExtras(bkEditForm.extrasText);
+
     setBookings((prev) =>
       prev.map((x) =>
         x.id === bkEditId
           ? {
               ...x,
+              bookingCode: bkEditForm.bookingCode,
+              customerName: bkEditForm.customerName,
+              customerPhone: bkEditForm.customerPhone,
+              verifyType: bkEditForm.verifyType,
               carName: bkEditForm.carName,
               carPlate: bkEditForm.carPlate,
               pricePerDay: Number(bkEditForm.pricePerDay) || 0,
@@ -612,6 +1184,14 @@ export default function AdminPage() {
               pickupTime: pickISO,
               returnLocation: bkEditForm.returnLocation,
               returnTime: retISO,
+              discount: Number(bkEditForm.discount) || 0,
+              deposit: Number(bkEditForm.deposit) || 0,
+              channel: bkEditForm.channel,
+              notes: bkEditForm.notes,
+              paymentStatus: bkEditForm.paymentStatus,
+              bookingStatus: bkEditForm.bookingStatus,
+              extras,
+              slipImage: bkEditForm.slipImage || "",
             }
           : x
       )
@@ -619,27 +1199,7 @@ export default function AdminPage() {
     closeBkEdit();
   };
 
-  /* Helpers: ทำเครื่องหมายเสร็จสิ้น */
-  const markCompleted = (b) => {
-    // 1) เปลี่ยนสถานะการจองและชำระเงินให้เป็น "เสร็จสิ้น"
-    setBookings((prev) =>
-      prev.map((x) =>
-        x.id === b.id
-          ? { ...x, bookingStatus: "เสร็จสิ้น", paymentStatus: "เสร็จสิ้น" }
-          : x
-      )
-    );
-    // 2) เปลี่ยนสถานะรถเป็น "ซ่อมแซม"
-    setCars((prev) =>
-      prev.map((c) => {
-        const samePlate = b.carPlate && c.licensePlate === b.carPlate;
-        const sameName = !b.carPlate && b.carName && c.name === b.carName;
-        return samePlate || sameName ? { ...c, status: "ซ่อมแซม" } : c;
-      })
-    );
-  };
-
-  /* Mock employee */
+  /* employee mock */
   const employee = {
     id: "E-2024-001",
     name: "สมชาย แอดมิน",
@@ -659,9 +1219,8 @@ export default function AdminPage() {
       <Headers />
 
       <main className="flex-1 px-4 py-6">
-        {/* ใช้ 12 คอลัมน์: แถวบนซ้าย/ขวา และแถวล่างเต็มกว้าง */}
         <div className="mx-auto max-w-7xl grid grid-cols-12 gap-6 px-2 sm:px-4">
-          {/* 1) ซ้าย: ข้อมูลพนักงาน */}
+          {/* Employee card */}
           <section className="col-span-12 lg:col-span-3">
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="relative w-full h-40 sm:h-48 lg:h-56 bg-gray-100">
@@ -695,7 +1254,7 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {/* สรุปงานวันนี้ */}
+                {/* Today summary */}
                 <div className="mt-5 grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-lg border bg-gray-50 p-2">
                     <div className="text-xs text-gray-500">รับรถวันนี้</div>
@@ -720,7 +1279,7 @@ export default function AdminPage() {
             </div>
           </section>
 
-          {/* 2) ขวา: เพิ่มรถเพื่อเช่า (เฉพาะฟอร์ม) */}
+          {/* Add car */}
           <section className="col-span-12 lg:col-span-9">
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
               <h2 className="text-lg font-bold text-black">เพิ่มรถเพื่อเช่า</h2>
@@ -882,7 +1441,6 @@ export default function AdminPage() {
                   </select>
                 </div>
 
-                {/*  ช่องอัพโหลดรูปรถ + พรีวิว */}
                 <div className="xl:col-span-2">
                   <label className="block text-xs font-semibold text-black mb-1">
                     รูปรถ (อัปโหลด)
@@ -945,10 +1503,10 @@ export default function AdminPage() {
             </div>
           </section>
 
-          {/* 3) พื้นที่ด้านล่างเต็มกว้าง: รวมตารางทั้งสอง */}
+          {/* Tables */}
           <section className="col-span-12">
             <div className="grid grid-cols-1 gap-6">
-              {/* ตารางรถ */}
+              {/* Car table */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-bold text-black">ตารางรถ</h2>
@@ -957,7 +1515,6 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {/* ฟิลเตอร์ของตารางรถ */}
                 <div className="mt-4 mb-3 flex flex-col sm:flex-row gap-3 items-start sm:items-end">
                   <div className="w-full sm:w-64">
                     <label className="block text-xs font-semibold text-black mb-1">
@@ -998,7 +1555,6 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {/* ตารางรถ */}
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-full text-sm">
                     <thead>
@@ -1016,9 +1572,19 @@ export default function AdminPage() {
                     <tbody className="divide-y divide-gray-100">
                       {filteredCars.map((c) => {
                         const key = c.licensePlate || c.name;
-                        // ⬇️ หากสถานะรถเป็น "ซ่อมแซม" ให้ล้างจองถัดไปในตารางรถ
-                        const nb =
-                          c.status === "ซ่อมแซม" ? null : nextBookingMap[key];
+
+                        // ✅ สถานะที่คำนวณจากตารางการจองลูกค้า (ต้องมีฟังก์ชัน getCarRowStatus ตามที่เพิ่มไว้)
+                        const displayStatus = getCarRowStatus(c, bookings, now);
+
+                        // ✅ ซ่อน "จองถัดไป" เมื่อรถไม่พร้อมปล่อย
+                        const hideNext = [
+                          "ซ่อมแซม",
+                          "ถูกยืมอยู่",
+                          "เลยกำหนดรับ",
+                          "เลยกำหนดส่ง",
+                        ].includes(displayStatus);
+
+                        const nb = hideNext ? null : nextBookingMap[key];
 
                         return (
                           <tr key={c.id} className="align-middle">
@@ -1036,7 +1602,7 @@ export default function AdminPage() {
                               {fmtBaht(c.pricePerDay)} ฿
                             </td>
                             <td className="py-3 pr-3">
-                              <StatusBadge value={c.status} />
+                              <StatusBadge value={displayStatus} />
                             </td>
                             <td className="py-3 pr-3 text-gray-700">
                               {nb ? (
@@ -1054,22 +1620,24 @@ export default function AdminPage() {
                               )}
                             </td>
                             <td className="py-3 pr-3">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => openEdit(c)}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
-                                  aria-label={`แก้ไข ${c.name}`}
-                                >
-                                  ✎ แก้ไข
-                                </button>
-                                <button
-                                  onClick={() => handleDelete(c.id)}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50 hover:border-gray-400"
-                                  aria-label={`ลบ ${c.name}`}
-                                >
-                                  ลบ
-                                </button>
-                              </div>
+                              <td className="py-3 pr-3">
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => openEdit(c)}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
+                                    aria-label={`แก้ไข ${c.name}`}
+                                  >
+                                    ✎ แก้ไข
+                                  </button>
+                                  <button
+                                    onClick={() => handleDelete(c.id)}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50 hover:border-gray-400"
+                                    aria-label={`ลบ ${c.name}`}
+                                  >
+                                    ลบ
+                                  </button>
+                                </div>
+                              </td>
                             </td>
                           </tr>
                         );
@@ -1079,7 +1647,7 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* ตารางการจอง */}
+              {/* Booking table (with full handlers) */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-bold text-black">
@@ -1090,7 +1658,7 @@ export default function AdminPage() {
                   </span>
                 </div>
 
-                {/* ฟิลเตอร์ของตารางการจอง */}
+                {/* filters */}
                 <div className="mt-4 flex flex-col sm:flex-row gap-3 items-start sm:items-end">
                   <div className="w-full sm:w-96">
                     <label className="block text-xs font-semibold text-black mb-1">
@@ -1122,6 +1690,7 @@ export default function AdminPage() {
                       <option>ทั้งหมด</option>
                       <option>ยืนยันแล้ว</option>
                       <option>รอชำระ</option>
+                      <option>รอรับ</option>
                       <option>ยกเลิก</option>
                       <option>เสร็จสิ้น</option>
                     </select>
@@ -1161,7 +1730,7 @@ export default function AdminPage() {
                   </button>
                 </div>
 
-                {/* ตารางการจอง */}
+                {/* table */}
                 <div className="mt-4 overflow-x-auto">
                   <table className="w-full min-w-full text-sm">
                     <thead>
@@ -1181,6 +1750,7 @@ export default function AdminPage() {
                     <tbody className="divide-y divide-gray-100">
                       {filteredBookings.map((b) => {
                         const calc = computeTotal(b);
+                        const lc = getLifecycle(b, now);
                         return (
                           <tr key={b.id} className="align-middle">
                             <td className="py-3 pr-3 text-gray-700">
@@ -1219,16 +1789,19 @@ export default function AdminPage() {
                               <PayBadge value={b.paymentStatus} />
                             </td>
                             <td className="py-3 pr-3">
-                              <BookingBadge value={b.bookingStatus} />
+                              <BookingBadge value={lc} />
                             </td>
                             <td className="py-3 pr-3">
                               <div className="flex flex-wrap items-center gap-2">
+                                {/* แก้ไข (เต็มรูปแบบ) */}
                                 <button
                                   onClick={() => openBkEdit(b)}
                                   className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
                                 >
                                   แก้ไข
                                 </button>
+
+                                {/* รายละเอียด */}
                                 <button
                                   onClick={() => openDetail(b)}
                                   className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
@@ -1238,66 +1811,59 @@ export default function AdminPage() {
 
                                 {/* ทำเครื่องหมายชำระแล้ว */}
                                 {b.paymentStatus !== "ชำระแล้ว" &&
-                                  b.bookingStatus !== "ยกเลิก" &&
-                                  b.bookingStatus !== "เสร็จสิ้น" && (
+                                  !["ยกเลิก", "เสร็จสิ้น"].includes(
+                                    b.bookingStatus
+                                  ) && (
                                     <button
-                                      onClick={() =>
-                                        setBookings((prev) =>
-                                          prev.map((x) =>
-                                            x.id === b.id
-                                              ? {
-                                                  ...x,
-                                                  paymentStatus: "ชำระแล้ว",
-                                                  bookingStatus:
-                                                    x.bookingStatus ===
-                                                      "ยกเลิก" ||
-                                                    x.bookingStatus ===
-                                                      "เสร็จสิ้น"
-                                                      ? x.bookingStatus
-                                                      : "ยืนยันแล้ว",
-                                                }
-                                              : x
-                                          )
-                                        )
-                                      }
+                                      onClick={() => handleMarkPaid(b)}
                                       className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
                                     >
                                       ชำระแล้ว
                                     </button>
                                   )}
 
-                                {/* ปุ่มเสร็จสิ้น */}
-                                {b.bookingStatus !== "เสร็จสิ้น" &&
-                                  b.bookingStatus !== "ยกเลิก" && (
+                                {/* รับสำเร็จ: แสดงใน รอรับ / เลยกำหนดรับ (ยังไม่รับรถ) */}
+                                {[
+                                  LIFECYCLE.WAIT_PICKUP,
+                                  LIFECYCLE.PICKUP_OVERDUE,
+                                ].includes(lc) &&
+                                  !["ยกเลิก", "เสร็จสิ้น"].includes(
+                                    b.bookingStatus
+                                  ) && (
+                                    <button
+                                      onClick={() => handleConfirmPickup(b)}
+                                      className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
+                                    >
+                                      รับสำเร็จ
+                                    </button>
+                                  )}
+
+                                {/* คืนสำเร็จ: แสดงใน กำลังเช่า / เลยกำหนดคืน */}
+                                {[
+                                  LIFECYCLE.IN_USE,
+                                  LIFECYCLE.RETURN_OVERDUE,
+                                ].includes(lc) &&
+                                  !["ยกเลิก", "เสร็จสิ้น"].includes(
+                                    b.bookingStatus
+                                  ) && (
                                     <button
                                       onClick={() => markCompleted(b)}
                                       className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
                                     >
-                                      เสร็จสิ้น
+                                      คืนสำเร็จ
                                     </button>
                                   )}
 
-                                {/* ยกเลิก */}
-                                {b.bookingStatus !== "ยกเลิก" &&
-                                  b.bookingStatus !== "เสร็จสิ้น" &&
-                                  !(
-                                    b.paymentStatus === "ชำระแล้ว" &&
-                                    b.bookingStatus === "ยืนยันแล้ว"
-                                  ) && (
+                                {/* ยกเลิก: ห้ามยกเลิกเมื่อรถกำลังเช่าหรือเลยกำหนดคืน */}
+                                {!["ยกเลิก", "เสร็จสิ้น"].includes(
+                                  b.bookingStatus
+                                ) &&
+                                  ![
+                                    LIFECYCLE.IN_USE,
+                                    LIFECYCLE.RETURN_OVERDUE,
+                                  ].includes(lc) && (
                                     <button
-                                      onClick={() =>
-                                        setBookings((prev) =>
-                                          prev.map((x) =>
-                                            x.id === b.id
-                                              ? {
-                                                  ...x,
-                                                  bookingStatus: "ยกเลิก",
-                                                  paymentStatus: "ยกเลิก",
-                                                }
-                                              : x
-                                          )
-                                        )
-                                      }
+                                      onClick={() => handleCancel(b)}
                                       className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
                                     >
                                       ยกเลิก
@@ -1329,7 +1895,7 @@ export default function AdminPage() {
 
       <Footer />
 
-      {/* ----- Modal แก้ไขข้อมูลรถ ----- */}
+      {/* ----- Modal แก้ไขรถ ----- */}
       {editOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={closeEdit} />
@@ -1527,7 +2093,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ----- Modal รายละเอียดการจอง ----- */}
+      {/* ----- Modal รายละเอียดการจอง (โชว์สลิป mockup) ----- */}
       {detailOpen && detailItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={closeDetail} />
@@ -1583,13 +2149,11 @@ export default function AdminPage() {
                     </div>
                     <div>
                       <div className="mb-1">
-                        มัดจำ: {fmtBaht(detailItem.deposit)} ฿
-                      </div>
-                      <div className="mb-1">
                         ชำระเงิน: <PayBadge value={detailItem.paymentStatus} />
                       </div>
                       <div className="mb-1">
-                        สถานะ: <BookingBadge value={detailItem.bookingStatus} />
+                        สถานะ:{" "}
+                        <BookingBadge value={getLifecycle(detailItem, now)} />
                       </div>
                       <div className="font-semibold">
                         รวมสุทธิ: {fmtBaht(c.total)} ฿
@@ -1600,7 +2164,7 @@ export default function AdminPage() {
               })()}
             </div>
 
-            {/* หมายเหตุจากลูกค้า */}
+            {/* หมายเหตุ */}
             <div className="mt-4 rounded-lg border bg-gray-200 p-3">
               <div className="text-xs font-semibold text-gray-700 mb-1">
                 หมายเหตุจากลูกค้า
@@ -1610,52 +2174,31 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <div className="mt-5 flex items-center justify-end gap-2 text-black">
-              {/* ยกเลิก = เซ็ตสองช่องเป็นยกเลิก */}
-              {detailItem.bookingStatus !== "ยกเลิก" &&
-                detailItem.bookingStatus !== "เสร็จสิ้น" && (
-                  <button
-                    onClick={() => {
-                      setBookings((prev) =>
-                        prev.map((x) =>
-                          x.id === detailItem.id
-                            ? {
-                                ...x,
-                                bookingStatus: "ยกเลิก",
-                                paymentStatus: "ยกเลิก",
-                              }
-                            : x
-                        )
-                      );
-                      closeDetail();
-                    }}
-                    className="px-4 py-2 rounded-lg border"
-                  >
-                    ยกเลิกการจอง
-                  </button>
-                )}
+            {/* สลิปชำระเงิน (Mockup) */}
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                สลิปชำระเงิน (Mockup)
+              </div>
+              {detailItem.slipImage ? (
+                <img
+                  src={detailItem.slipImage}
+                  alt="สลิปชำระเงิน"
+                  className="w-full max-w-sm rounded-lg border object-contain"
+                />
+              ) : (
+                <div className="w-full max-w-sm h-40 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400">
+                  — ยังไม่มีสลิป —
+                </div>
+              )}
+            </div>
 
-              {/* ชำระแล้ว */}
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-2 text-black">
+              {/* ทำเครื่องหมายชำระแล้ว */}
               {detailItem.paymentStatus !== "ชำระแล้ว" &&
-                detailItem.bookingStatus !== "ยกเลิก" &&
-                detailItem.bookingStatus !== "เสร็จสิ้น" && (
+                !["ยกเลิก", "เสร็จสิ้น"].includes(detailItem.bookingStatus) && (
                   <button
                     onClick={() => {
-                      setBookings((prev) =>
-                        prev.map((x) =>
-                          x.id === detailItem.id
-                            ? {
-                                ...x,
-                                paymentStatus: "ชำระแล้ว",
-                                bookingStatus:
-                                  x.bookingStatus === "ยกเลิก" ||
-                                  x.bookingStatus === "เสร็จสิ้น"
-                                    ? x.bookingStatus
-                                    : "ยืนยันแล้ว",
-                              }
-                            : x
-                        )
-                      );
+                      handleMarkPaid(detailItem);
                       closeDetail();
                     }}
                     className="px-4 py-2 rounded-lg border"
@@ -1664,9 +2207,27 @@ export default function AdminPage() {
                   </button>
                 )}
 
-              {/* เสร็จสิ้น */}
-              {detailItem.bookingStatus !== "เสร็จสิ้น" &&
-                detailItem.bookingStatus !== "ยกเลิก" && (
+              {/* รับสำเร็จ */}
+              {[LIFECYCLE.WAIT_PICKUP, LIFECYCLE.PICKUP_OVERDUE].includes(
+                getLifecycle(detailItem, now)
+              ) &&
+                !["ยกเลิก", "เสร็จสิ้น"].includes(detailItem.bookingStatus) && (
+                  <button
+                    onClick={() => {
+                      handleConfirmPickup(detailItem);
+                      closeDetail();
+                    }}
+                    className="px-4 py-2 rounded-lg border"
+                  >
+                    รับสำเร็จ
+                  </button>
+                )}
+
+              {/* คืนสำเร็จ */}
+              {[LIFECYCLE.IN_USE, LIFECYCLE.RETURN_OVERDUE].includes(
+                getLifecycle(detailItem, now)
+              ) &&
+                !["ยกเลิก", "เสร็จสิ้น"].includes(detailItem.bookingStatus) && (
                   <button
                     onClick={() => {
                       markCompleted(detailItem);
@@ -1674,7 +2235,23 @@ export default function AdminPage() {
                     }}
                     className="px-4 py-2 rounded-lg bg-black text-white"
                   >
-                    ทำเครื่องหมายเสร็จสิ้น
+                    คืนสำเร็จ
+                  </button>
+                )}
+
+              {/* ยกเลิก */}
+              {!["ยกเลิก", "เสร็จสิ้น"].includes(detailItem.bookingStatus) &&
+                ![LIFECYCLE.IN_USE, LIFECYCLE.RETURN_OVERDUE].includes(
+                  getLifecycle(detailItem, now)
+                ) && (
+                  <button
+                    onClick={() => {
+                      handleCancel(detailItem);
+                      closeDetail();
+                    }}
+                    className="px-4 py-2 rounded-lg border"
+                  >
+                    ยกเลิกการจอง
                   </button>
                 )}
             </div>
@@ -1682,7 +2259,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ----- Modal แก้ไขการจอง ----- */}
+      {/* ----- Modal แก้ไขการจอง (Full + Slip Upload) ----- */}
       {bkEditOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={closeBkEdit} />
@@ -1702,6 +2279,53 @@ export default function AdminPage() {
               onSubmit={handleBkEditSubmit}
               className="mt-4 grid grid-cols-1 md:grid-cols-6 gap-3 text-sm"
             >
+              {/* Customer */}
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  รหัสจอง
+                </label>
+                <input
+                  name="bookingCode"
+                  value={bkEditForm.bookingCode}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  เอกสารยืนยัน
+                </label>
+                <input
+                  name="verifyType"
+                  value={bkEditForm.verifyType}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  ชื่อลูกค้า
+                </label>
+                <input
+                  name="customerName"
+                  value={bkEditForm.customerName}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  เบอร์โทร
+                </label>
+                <input
+                  name="customerPhone"
+                  value={bkEditForm.customerPhone}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                />
+              </div>
+
+              {/* Car */}
               <div className="md:col-span-3">
                 <label className="block text-xs font-semibold text-black mb-1">
                   เลือกรถ
@@ -1710,7 +2334,7 @@ export default function AdminPage() {
                   name="carKey"
                   value={bkEditForm.carKey}
                   onChange={handleBkEditChange}
-                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
                 >
                   <option value="">— เลือกรถ —</option>
                   {cars.map((c) => {
@@ -1734,20 +2358,20 @@ export default function AdminPage() {
                   min="0"
                   value={bkEditForm.pricePerDay}
                   onChange={handleBkEditChange}
-                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black placeholder:text-gray-400"
                 />
               </div>
 
+              {/* Locations */}
               <div className="md:col-span-3">
                 <label className="block text-xs font-semibold text-black mb-1">
                   สถานที่รับรถ
                 </label>
                 <input
-                  type="text"
                   name="pickupLocation"
                   value={bkEditForm.pickupLocation}
                   onChange={handleBkEditChange}
-                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
                 />
               </div>
               <div className="md:col-span-3">
@@ -1755,14 +2379,14 @@ export default function AdminPage() {
                   สถานที่คืนรถ
                 </label>
                 <input
-                  type="text"
                   name="returnLocation"
                   value={bkEditForm.returnLocation}
                   onChange={handleBkEditChange}
-                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
                 />
               </div>
 
+              {/* Times */}
               <div className="md:col-span-3">
                 <label className="block text-xs font-semibold text-black mb-1">
                   วัน–เวลา รับรถ
@@ -1772,7 +2396,7 @@ export default function AdminPage() {
                   name="pickupTime"
                   value={bkEditForm.pickupTime}
                   onChange={handleBkEditChange}
-                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
                 />
               </div>
               <div className="md:col-span-3">
@@ -1784,12 +2408,148 @@ export default function AdminPage() {
                   name="returnTime"
                   value={bkEditForm.returnTime}
                   onChange={handleBkEditChange}
-                  className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
                 />
               </div>
 
-              <div className="md:col-span-6 text-xs text-gray-500">
-                ระบบจะคำนวณ “วันเช่า/รวมสุทธิ” ใหม่อัตโนมัติหลังบันทึก
+              {/* Money */}
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  ส่วนลด (บาท)
+                </label>
+                <input
+                  type="number"
+                  name="discount"
+                  min="0"
+                  value={bkEditForm.discount}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  มัดจำ (บาท)
+                </label>
+                <input
+                  type="number"
+                  name="deposit"
+                  min="0"
+                  value={bkEditForm.deposit}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  ช่องทาง
+                </label>
+                <input
+                  name="channel"
+                  value={bkEditForm.channel}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                />
+              </div>
+
+              {/* Status */}
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  สถานะชำระเงิน
+                </label>
+                <select
+                  name="paymentStatus"
+                  value={bkEditForm.paymentStatus}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                >
+                  <option>รอชำระ</option>
+                  <option>ชำระแล้ว</option>
+                  <option>ยกเลิก</option>
+                  <option>เสร็จสิ้น</option>
+                </select>
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  สถานะการจอง
+                </label>
+                <select
+                  name="bookingStatus"
+                  value={bkEditForm.bookingStatus}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                >
+                  <option>รอชำระ</option>
+                  <option>ยืนยันแล้ว</option>
+                  <option>รอรับ</option>
+                  <option>ยกเลิก</option>
+                  <option>เสร็จสิ้น</option>
+                </select>
+              </div>
+
+              {/* Extras as text */}
+              <div className="md:col-span-6">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  ออปชันเสริม (name:price ต่อบรรทัด)
+                </label>
+                <textarea
+                  name="extrasText"
+                  rows={3}
+                  value={bkEditForm.extrasText}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black placeholder:text-gray-400"
+                  placeholder="คาร์ซีท:100&#10;GPS:60"
+                />
+              </div>
+
+              {/* Notes */}
+              <div className="md:col-span-6">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  หมายเหตุ
+                </label>
+                <textarea
+                  name="notes"
+                  rows={3}
+                  value={bkEditForm.notes}
+                  onChange={handleBkEditChange}
+                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
+                />
+              </div>
+
+              {/* Slip upload (mock) */}
+              <div className="md:col-span-6">
+                <label className="block text-xs font-semibold text-black mb-1">
+                  สลิปโอนเงิน (Mockup)
+                </label>
+                <input
+                  ref={slipRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleSlipChange}
+                  className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:px-3 file:py-2 file:text-gray-800 hover:file:bg-gray-50"
+                />
+                {bkEditForm.slipImage ? (
+                  <div className="mt-2">
+                    <img
+                      src={bkEditForm.slipImage}
+                      alt="สลิป"
+                      className="h-40 w-auto rounded-lg border object-contain"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBkEditForm((p) => ({ ...p, slipImage: "" }));
+                        if (slipRef.current) slipRef.current.value = "";
+                      }}
+                      className="mt-2 text-xs text-gray-600 underline"
+                    >
+                      ลบสลิป
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-gray-500">
+                    แนบเพื่อทดสอบการแสดงผลในหน้า “รายละเอียดการจอง”
+                  </p>
+                )}
               </div>
 
               <div className="md:col-span-6 flex items-center justify-end gap-3 pt-2">
