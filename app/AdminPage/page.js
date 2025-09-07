@@ -1,7 +1,7 @@
 // app/admin/page.js
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Headers from "@/Components/HeaderAd";
 import Footer from "@/Components/Footer";
 
@@ -158,7 +158,7 @@ export default function AdminPage() {
         brand: "Mitsubishi",
         type: "JDM",
         pricePerDay: 1500,
-        status: "ถูกยืมอยู่",
+        status: "ว่าง",
         transmission: "ธรรมดา",
         licensePlate: "2ขค 5678",
         seats: 5,
@@ -219,6 +219,7 @@ export default function AdminPage() {
   }, [cars, filters]);
 
   /* Add car form */
+  const fileRef = useRef(null);
   const [form, setForm] = useState({
     name: "",
     brand: "",
@@ -231,10 +232,23 @@ export default function AdminPage() {
     fuel: "เบนซิน",
     year: "",
     description: "",
+    imageData: "", // ⬅️ เก็บ Base64 ของรูปรถ
   });
   const handleFormChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+  };
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setForm((p) => ({ ...p, imageData: "" }));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((p) => ({ ...p, imageData: String(reader.result || "") }));
+    };
+    reader.readAsDataURL(file);
   };
   const handleAddCar = (e) => {
     e.preventDefault();
@@ -256,8 +270,10 @@ export default function AdminPage() {
       fuel: form.fuel,
       year: form.year ? Number(form.year) : undefined,
       description: form.description,
+      imageData: form.imageData || "", // ⬅️ แนบรูปเข้าออบเจ็กต์รถ
     };
     setCars((prev) => [newCar, ...prev]);
+    // reset
     setForm({
       name: "",
       brand: "",
@@ -270,7 +286,9 @@ export default function AdminPage() {
       fuel: "เบนซิน",
       year: "",
       description: "",
+      imageData: "",
     });
+    if (fileRef.current) fileRef.current.value = "";
   };
 
   const handleDelete = (id) => {
@@ -364,7 +382,7 @@ export default function AdminPage() {
         pickupLocation: "สนามบินเชียงใหม่ (CNX)",
         pickupTime: toISO("2025-09-07T10:00:00"),
         returnLocation: "สาขาสีลม",
-        returnTime: toISO("2025-09-10T12:00:00"),
+        returnTime: toISO("2025-09-15T12:00:00"),
         extras: [{ name: "คาร์ซีท", price: 100 }],
         discount: 200,
         deposit: 5000,
@@ -393,7 +411,7 @@ export default function AdminPage() {
         paymentStatus: "รอชำระ",
         bookingStatus: "รอชำระ",
         channel: "LINE",
-        createdAt: toISO("2025-09-07T08:30:00"),
+        createdAt: toISO("2025-09-08T08:30:00"),
         notes: "",
       },
       {
@@ -406,9 +424,9 @@ export default function AdminPage() {
         carPlate: "กท 9999",
         pricePerDay: 2000,
         pickupLocation: "สาขาสีลม",
-        pickupTime: toISO("2025-09-12T14:00:00"),
+        pickupTime: toISO("2025-09-07T14:00:00"),
         returnLocation: "สาขาสีลม",
-        returnTime: toISO("2025-09-15T12:00:00"),
+        returnTime: toISO("2025-09-12T12:00:00"),
         extras: [{ name: "GPS", price: 60 }],
         discount: 0,
         deposit: 5000,
@@ -484,17 +502,33 @@ export default function AdminPage() {
   }, [cars]);
 
   /* today summary (for employee card) */
+  // helper: การจองที่ยังต้องปฏิบัติงานอยู่
+  const isActiveBooking = (b) =>
+    b?.bookingStatus !== "ยกเลิก" &&
+    b?.bookingStatus !== "ชำระแล้ว" &&
+    b?.bookingStatus !== "ยืนยันแล้ว" &&
+    b?.bookingStatus !== "เสร็จสิ้น";
+
   const todaySummary = useMemo(() => {
     const today = new Date();
-    const pickups = bookings.filter((b) =>
-      sameDate(new Date(b.pickupTime), today)
+    const pickups = bookings.filter(
+      (b) =>
+        isActiveBooking(b) &&
+        b.pickupTime &&
+        sameDate(new Date(b.pickupTime), today)
     ).length;
-    const returns = bookings.filter((b) =>
-      sameDate(new Date(b.returnTime), today)
+
+    const returns = bookings.filter(
+      (b) =>
+        isActiveBooking(b) &&
+        b.returnTime &&
+        sameDate(new Date(b.returnTime), today)
     ).length;
+
     const pendingPay = bookings.filter(
-      (b) => b.paymentStatus === "รอชำระ"
+      (b) => isActiveBooking(b) && b.paymentStatus === "รอชำระ"
     ).length;
+
     return { pickups, returns, pendingPay };
   }, [bookings]);
 
@@ -847,6 +881,44 @@ export default function AdminPage() {
                     <option value="ซ่อมแซม">ซ่อมแซม</option>
                   </select>
                 </div>
+
+                {/*  ช่องอัพโหลดรูปรถ + พรีวิว */}
+                <div className="xl:col-span-2">
+                  <label className="block text-xs font-semibold text-black mb-1">
+                    รูปรถ (อัปโหลด)
+                  </label>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:px-3 file:py-2 file:text-gray-800 hover:file:bg-gray-50"
+                  />
+                  {form.imageData ? (
+                    <div className="mt-2">
+                      <img
+                        src={form.imageData}
+                        alt="ตัวอย่างรูปรถ"
+                        className="h-24 w-full max-w-[180px] rounded-lg border object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForm((p) => ({ ...p, imageData: "" }));
+                          if (fileRef.current) fileRef.current.value = "";
+                        }}
+                        className="mt-2 text-xs text-gray-600 underline"
+                      >
+                        ลบรูป
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-xs text-gray-500">
+                      รองรับไฟล์ .jpg, .png, .webp
+                    </p>
+                  )}
+                </div>
+
                 <div className="xl:col-span-4">
                   <label className="block text-xs font-semibold text-black mb-1">
                     คำอธิบายเพิ่มเติม
@@ -1164,7 +1236,7 @@ export default function AdminPage() {
                                   รายละเอียด
                                 </button>
 
-                                {/* ทำเครื่องหมายชำระแล้ว → ชำระเงิน=ชำระแล้ว + (ถ้าไม่ยกเลิก/ไม่เสร็จสิ้น) ให้สถานะ=ยืนยันแล้ว */}
+                                {/* ทำเครื่องหมายชำระแล้ว */}
                                 {b.paymentStatus !== "ชำระแล้ว" &&
                                   b.bookingStatus !== "ยกเลิก" &&
                                   b.bookingStatus !== "เสร็จสิ้น" && (
@@ -1194,7 +1266,7 @@ export default function AdminPage() {
                                     </button>
                                   )}
 
-                                {/* ปุ่มเสร็จสิ้น → เซ็ตทั้งสองช่องเป็นเสร็จสิ้น และเปลี่ยนรถเป็นซ่อมแซม */}
+                                {/* ปุ่มเสร็จสิ้น */}
                                 {b.bookingStatus !== "เสร็จสิ้น" &&
                                   b.bookingStatus !== "ยกเลิก" && (
                                     <button
@@ -1205,9 +1277,13 @@ export default function AdminPage() {
                                     </button>
                                   )}
 
-                                {/* ยกเลิก → เซ็ตทั้งสองช่องเป็นยกเลิก */}
+                                {/* ยกเลิก */}
                                 {b.bookingStatus !== "ยกเลิก" &&
-                                  b.bookingStatus !== "เสร็จสิ้น" && (
+                                  b.bookingStatus !== "เสร็จสิ้น" &&
+                                  !(
+                                    b.paymentStatus === "ชำระแล้ว" &&
+                                    b.bookingStatus === "ยืนยันแล้ว"
+                                  ) && (
                                     <button
                                       onClick={() =>
                                         setBookings((prev) =>
@@ -1524,6 +1600,16 @@ export default function AdminPage() {
               })()}
             </div>
 
+            {/* หมายเหตุจากลูกค้า */}
+            <div className="mt-4 rounded-lg border bg-gray-200 p-3">
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                หมายเหตุจากลูกค้า
+              </div>
+              <div className="text-sm text-black whitespace-pre-wrap">
+                {detailItem?.notes?.trim() || "—"}
+              </div>
+            </div>
+
             <div className="mt-5 flex items-center justify-end gap-2 text-black">
               {/* ยกเลิก = เซ็ตสองช่องเป็นยกเลิก */}
               {detailItem.bookingStatus !== "ยกเลิก" &&
@@ -1549,7 +1635,7 @@ export default function AdminPage() {
                   </button>
                 )}
 
-              {/* ชำระแล้ว = ชำระเงิน:ชำระแล้ว + (ถ้าไม่ยกเลิก/ไม่เสร็จสิ้น) สถานะ:ยืนยันแล้ว */}
+              {/* ชำระแล้ว */}
               {detailItem.paymentStatus !== "ชำระแล้ว" &&
                 detailItem.bookingStatus !== "ยกเลิก" &&
                 detailItem.bookingStatus !== "เสร็จสิ้น" && (
@@ -1578,7 +1664,7 @@ export default function AdminPage() {
                   </button>
                 )}
 
-              {/* เสร็จสิ้น = เซ็ตสองช่องเป็นเสร็จสิ้น + รถ=ซ่อมแซม */}
+              {/* เสร็จสิ้น */}
               {detailItem.bookingStatus !== "เสร็จสิ้น" &&
                 detailItem.bookingStatus !== "ยกเลิก" && (
                   <button

@@ -1,19 +1,86 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/FooterMinimal";
 
 export default function Login() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [remember, setRemember] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
 
-  const handleSubmit = (e) => {
+  useEffect(() => {
+    // เติมอีเมลที่เคยจำไว้ (ถ้ามี)
+    const savedEmail = localStorage.getItem("vrent_login_email") || "";
+    const savedRemember = localStorage.getItem("vrent_remember") === "1";
+    if (savedEmail) setEmail(savedEmail);
+    if (savedRemember) setRemember(true);
+  }, []);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // TODO: call your API here
-    console.log({ email, password, remember });
+    setErrMsg("");
+    setLoading(true);
+
+    try {
+      // ERPNext/Frappe login endpoint
+      const res = await fetch("https://demo.erpeazy.com/api/method/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        // สำคัญ: ให้บราวเซอร์จัดการคุกกี้เอง (ตั้ง Cookie header เองไม่ได้)
+        credentials: "include",
+        redirect: "follow",
+        body: JSON.stringify({
+          usr: email, // กรอกในฟอร์ม เช่น "administrator"
+          pwd: password, // กรอกในฟอร์ม เช่น "ZAQ!@WSX"
+        }),
+      });
+
+      const rawText = await res.text();
+      let data;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        data = { raw: rawText };
+      }
+
+      if (!res.ok) {
+        // พยายามดึง message จาก response ถ้ามี
+        const msg =
+          data?.message ||
+          data?.exc ||
+          data?.raw ||
+          "Login failed. Please check your credentials.";
+        throw new Error(
+          typeof msg === "string" ? msg : "Login failed. Please try again."
+        );
+      }
+
+      // จำอีเมลไว้ตามที่ผู้ใช้เลือก
+      if (remember) {
+        localStorage.setItem("vrent_login_email", email);
+        localStorage.setItem("vrent_remember", "1");
+      } else {
+        localStorage.removeItem("vrent_login_email");
+        localStorage.removeItem("vrent_remember");
+      }
+
+      // สำเร็จ — ไปหน้าแอดมิน (ปรับ path ได้ตามโปรเจ็กต์ของคุณ)
+      router.push("/adminpage");
+    } catch (err) {
+      console.error(err);
+      setErrMsg(err?.message || "เกิดข้อผิดพลาดในการเข้าสู่ระบบ");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -60,14 +127,12 @@ export default function Login() {
                   fill="none"
                   className="text-white"
                 >
-                  {/* ตัว V หลัก คมและหนา */}
                   <path
                     d="M3 4L12 20L21 4"
                     stroke="white"
                     strokeWidth="3.5"
                     strokeLinejoin="miter"
                   />
-                  {/* เส้นด้านใน เพิ่มความเฉียบ */}
                   <path
                     d="M6 4L12 15L18 4"
                     stroke="white"
@@ -87,11 +152,10 @@ export default function Login() {
                 {/* Email */}
                 <label className="block">
                   <span className="mb-2 block text-sm text-slate-300">
-                    Email Address
+                    Email Address / Username
                   </span>
                   <div className="relative">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                      {/* mail icon */}
                       <svg
                         width="18"
                         height="18"
@@ -116,11 +180,11 @@ export default function Login() {
                       </svg>
                     </span>
                     <input
-                      type="email"
+                      type="text"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@domain.com"
+                      placeholder="administrator หรือ you@domain.com"
                       className="w-full rounded-xl border border-white/10 bg-[#0F1530]/60 px-10 py-3 text-sm placeholder:text-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
                     />
                   </div>
@@ -133,7 +197,6 @@ export default function Login() {
                   </span>
                   <div className="relative">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                      {/* lock icon */}
                       <svg
                         width="18"
                         height="18"
@@ -171,7 +234,6 @@ export default function Login() {
                       className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:text-slate-200"
                       aria-label={show ? "Hide password" : "Show password"}
                     >
-                      {/* eye / eye-off */}
                       {show ? (
                         <svg
                           width="18"
@@ -216,6 +278,13 @@ export default function Login() {
                   </div>
                 </label>
 
+                {/* error message */}
+                {errMsg && (
+                  <div className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+                    {errMsg}
+                  </div>
+                )}
+
                 {/* remember + signup */}
                 <div className="mt-1 flex items-center justify-between">
                   <label className="flex items-center gap-2 text-sm text-slate-300">
@@ -239,9 +308,11 @@ export default function Login() {
                 {/* Login button */}
                 <button
                   type="submit"
-                  className="mt-2 w-full rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-900/40 transition hover:from-indigo-400 hover:to-violet-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                  disabled={loading}
+                  aria-busy={loading}
+                  className="mt-2 w-full rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-900/40 transition hover:from-indigo-400 hover:to-violet-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Login
+                  {loading ? "Logging in..." : "Login"}
                 </button>
               </form>
 
