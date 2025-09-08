@@ -1,7 +1,7 @@
 // app/delivery/page.js
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/Footer";
 
@@ -403,6 +403,104 @@ export default function DeliveryStaffPage() {
 
   const totalPhotos = idProofs.length + carProofs.length;
 
+  /* ───────────── Helper & Queue “วันนี้” ───────────── */
+
+  // เทียบวันเดียวกัน (local)
+  const sameDate = (a, b) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const fmtTime = (iso) => {
+    if (!iso) return "-";
+    const d = new Date(iso);
+    return d.toLocaleTimeString("th-TH", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  // สร้างเวลา "วันนี้" (local) แล้วแปลงเป็น ISO
+  const todayAt = (h, m = 0) => {
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return d.toISOString();
+  };
+
+  // Mock คิววันนี้ (สั้นๆ 3 งาน)
+  const initialQueue = useMemo(
+    () => [
+      {
+        bookingCode: "VR-2025-201",
+        customerName: "คุณเอ",
+        customerPhone: "080-111-0001",
+        carName: "Toyota Corolla Cross",
+        carPlate: "1กข-1234",
+        pickupLocation: "สนามบินเชียงใหม่ (CNX)",
+        pickupTime: todayAt(9, 30),
+        returnLocation: "สาขาสีลม",
+        returnTime: todayAt(11, 30),
+        status: "pending", // pending | in_progress | done
+      },
+      {
+        bookingCode: "VR-2025-202",
+        customerName: "คุณบี",
+        customerPhone: "081-222-0002",
+        carName: "Honda Civic",
+        carPlate: "ฮค-4444",
+        pickupLocation: "สาขาสีลม",
+        pickupTime: todayAt(13, 0),
+        returnLocation: "สาขาสีลม",
+        returnTime: todayAt(15, 0),
+        status: "in_progress",
+      },
+      {
+        bookingCode: "VR-2025-203",
+        customerName: "คุณซี",
+        customerPhone: "082-333-0003",
+        carName: "Isuzu D-Max",
+        carPlate: "ดม-2345",
+        pickupLocation: "สาขาสีลม",
+        pickupTime: todayAt(17, 30),
+        returnLocation: "สาขาสีลม",
+        returnTime: todayAt(19, 0),
+        status: "done",
+      },
+    ],
+    []
+  );
+
+  const [queue] = useState(initialQueue);
+
+  const todayQueue = useMemo(
+    () => queue.filter((j) => sameDate(new Date(j.pickupTime), new Date())),
+    [queue]
+  );
+
+  // เติมข้อมูลรายการคิวลงฟอร์มหลัก
+  const loadToForm = (j) => {
+    setForm((f) => ({
+      ...f,
+      bookingCode: j.bookingCode || "",
+      carPlate: j.carPlate || "",
+      carName: j.carName || "",
+      customerName: j.customerName || "",
+      customerPhone: j.customerPhone || "",
+      pickupLocation: j.pickupLocation || "",
+      pickupTime: j.pickupTime
+        ? new Date(j.pickupTime).toISOString().slice(0, 16)
+        : "",
+      returnLocation: j.returnLocation || "",
+      returnTime: j.returnTime
+        ? new Date(j.returnTime).toISOString().slice(0, 16)
+        : "",
+      // ไม่ยุ่ง field อื่นๆ
+    }));
+    try {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch {}
+  };
+
   return (
     <div className="flex flex-col min-h-screen bg-white text-slate-900">
       <Headers />
@@ -786,6 +884,88 @@ export default function DeliveryStaffPage() {
                 <span>เงินมัดจำ</span>
                 <span>{form.depositReceived ? "รับแล้ว" : "ยังไม่รับ"}</span>
               </div>
+            </div>
+          </aside>
+
+          {/* ขวา: คิววันนี้ (ตารางย่อ) */}
+          <aside className={`${cardCls} p-6 md:p-8 h-fit`}>
+            <h3 className="text-lg font-bold">คิววันนี้ (Today)</h3>
+            <p className="text-slate-600 text-sm mt-1">
+              แสดงเฉพาะงานรับรถที่นัดหมาย “วันนี้”
+            </p>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-slate-600">
+                    <th className="py-2 pr-3 text-left">เวลา</th>
+                    <th className="py-2 pr-3 text-left">รหัส</th>
+                    <th className="py-2 pr-3 text-left">รถ / ป้าย</th>
+                    <th className="py-2 pr-3 text-left">ลูกค้า</th>
+                    <th className="py-2 pr-3 text-left">สถานะ</th>
+                    <th className="py-2 pr-0 text-left">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {todayQueue.map((j) => (
+                    <tr key={j.bookingCode}>
+                      <td className="py-2 pr-3">{fmtTime(j.pickupTime)}</td>
+                      <td className="py-2 pr-3 font-medium">{j.bookingCode}</td>
+                      <td className="py-2 pr-3">
+                        {j.carName}
+                        <div className="text-xs text-slate-600">
+                          {j.carPlate}
+                        </div>
+                      </td>
+                      <td className="py-2 pr-3">
+                        {j.customerName}
+                        <div className="text-xs text-slate-600">
+                          {j.customerPhone}
+                        </div>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span
+                          className={cls(
+                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                            j.status === "pending" &&
+                              "bg-amber-100 text-amber-800",
+                            j.status === "in_progress" &&
+                              "bg-blue-100 text-blue-800",
+                            j.status === "done" &&
+                              "bg-emerald-100 text-emerald-800"
+                          )}
+                        >
+                          {j.status === "pending"
+                            ? "รอส่งมอบ"
+                            : j.status === "in_progress"
+                            ? "กำลังดำเนินการ"
+                            : "เสร็จแล้ว"}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-0">
+                        <button
+                          type="button"
+                          onClick={() => loadToForm(j)}
+                          className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"
+                          title="เปิดฟอร์มด้วยข้อมูลนี้"
+                        >
+                          เปิดฟอร์ม
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {todayQueue.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="py-4 text-center text-slate-500"
+                      >
+                        วันนี้ยังไม่มีคิวรับรถ
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </aside>
         </div>

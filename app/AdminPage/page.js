@@ -501,6 +501,129 @@ export default function AdminPage() {
     closeEdit();
   };
 
+  /* ───────────── Delivery Logs (สำหรับตรวจสอบ/สืบค้น/ดูรูปย้อนหลัง) ───────────── */
+  const tinyPng =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII=";
+
+  const initialDeliveries = useMemo(
+    () => [
+      {
+        id: "DLV-2025-001",
+        bookingCode: "VR-2025-201",
+        customerName: "คุณเอ",
+        customerPhone: "080-111-0001",
+        carName: "Toyota Corolla Cross",
+        carPlate: "1กข 1234",
+        pickupLocation: "สนามบินเชียงใหม่ (CNX)",
+        pickupTime: localToIsoPreserveWallTime("2025-09-09T09:30"),
+        returnLocation: "สาขาสีลม",
+        returnTime: localToIsoPreserveWallTime("2025-09-11T11:30"),
+        verifyType: "บัตรประชาชน",
+        depositReceived: true,
+        fuelLevel: "เต็มถัง",
+        odometer: "35,420",
+        notes: "ลูกค้าขอที่นั่งเด็ก 1 ตัว",
+        idProofs: [tinyPng],
+        carProofs: [tinyPng, tinyPng],
+        createdAt: localToIsoPreserveWallTime("2025-09-09T09:40"),
+        staff: "สมชาย แอดมิน",
+      },
+      {
+        id: "DLV-2025-002",
+        bookingCode: "VR-2025-202",
+        customerName: "คุณบี",
+        customerPhone: "081-222-0002",
+        carName: "Honda Civic",
+        carPlate: "ฮค 4444",
+        pickupLocation: "สาขาสีลม",
+        pickupTime: localToIsoPreserveWallTime("2025-09-09T13:00"),
+        returnLocation: "สาขาสีลม",
+        returnTime: localToIsoPreserveWallTime("2025-09-10T15:00"),
+        verifyType: "ใบขับขี่",
+        depositReceived: false,
+        fuelLevel: "3/4",
+        odometer: "12,008",
+        notes: "",
+        idProofs: [tinyPng],
+        carProofs: [],
+        createdAt: localToIsoPreserveWallTime("2025-09-09T13:10"),
+        staff: "สมชาย แอดมิน",
+      },
+      {
+        id: "DLV-2025-003",
+        bookingCode: "VR-2025-203",
+        customerName: "คุณซี",
+        customerPhone: "082-333-0003",
+        carName: "Isuzu D-Max",
+        carPlate: "ดม 2345",
+        pickupLocation: "สาขาสีลม",
+        pickupTime: localToIsoPreserveWallTime("2025-09-09T17:30"),
+        returnLocation: "สาขาสีลม",
+        returnTime: localToIsoPreserveWallTime("2025-09-10T19:00"),
+        verifyType: "Passport",
+        depositReceived: true,
+        fuelLevel: "1/2",
+        odometer: "88,901",
+        notes: "รูปด้านซ้ายมีรอยเดิม",
+        idProofs: [],
+        carProofs: [tinyPng],
+        createdAt: localToIsoPreserveWallTime("2025-09-09T17:45"),
+        staff: "สมชาย แอดมิน",
+      },
+    ],
+    []
+  );
+
+  const [deliveries, setDeliveries] = useState(initialDeliveries);
+
+  /* ตัวกรอง */
+  const [dlvFilter, setDlvFilter] = useState({
+    q: "",
+    date: "", // YYYY-MM-DD
+  });
+
+  const filteredDeliveries = useMemo(() => {
+    const q = dlvFilter.q.trim().toLowerCase();
+    const day = dlvFilter.date ? new Date(dlvFilter.date) : null;
+
+    return deliveries.filter((d) => {
+      // ค้นหาแบบกว้าง
+      const hay = [
+        d.id,
+        d.bookingCode,
+        d.customerName,
+        d.customerPhone,
+        d.carName,
+        d.carPlate,
+        d.pickupLocation,
+        d.returnLocation,
+        d.verifyType,
+        d.staff,
+      ]
+        .filter(Boolean)
+        .map(String)
+        .map((s) => s.toLowerCase());
+      const hitQ = !q || hay.some((s) => s.includes(q));
+
+      // กรองตาม 'วันส่งมอบ' (pickupTime) เฉพาะวันเดียวกัน
+      const hitDate = !day || sameDate(new Date(d.pickupTime), day);
+
+      return hitQ && hitDate;
+    });
+  }, [deliveries, dlvFilter]);
+
+  /* Modal: ดูรายละเอียด + รูป */
+  const [dlvDetailOpen, setDlvDetailOpen] = useState(false);
+  const [dlvDetailItem, setDlvDetailItem] = useState(null);
+  const openDlvDetail = (row) => {
+    setDlvDetailItem(row);
+    setDlvDetailOpen(true);
+  };
+  const closeDlvDetail = () => {
+    setDlvDetailItem(null);
+    setDlvDetailOpen(false);
+  };
+
   /* ---- Bookings ---- */
   const initialBookings = useMemo(
     () => [
@@ -1514,7 +1637,7 @@ export default function AdminPage() {
               </div>
 
               {/* Booking table */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-5">
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-bold text-black">
                     ตารางการจองของลูกค้า
@@ -1751,6 +1874,138 @@ export default function AdminPage() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+
+            {/* Delivery Logs table */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-black">
+                  บันทึกส่งมอบ (Delivery Logs)
+                </h2>
+                <span className="text-sm text-gray-600">
+                  ทั้งหมด {deliveries.length} รายการ
+                </span>
+              </div>
+
+              {/* Filters */}
+              <div className="mt-4 flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+                <div className="w-full sm:w-96">
+                  <label className="block text-xs font-semibold text-black mb-1">
+                    ค้นหา
+                  </label>
+                  <input
+                    value={dlvFilter.q}
+                    onChange={(e) =>
+                      setDlvFilter((p) => ({ ...p, q: e.target.value }))
+                    }
+                    placeholder="รหัสส่งมอบ/รหัสจอง/ลูกค้า/รถ/ป้าย/สถานที่/พนักงาน…"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
+                  />
+                </div>
+                <div className="w-full sm:w-64">
+                  <label className="block text-xs font-semibold text-black mb-1">
+                    วันที่ส่งมอบ
+                  </label>
+                  <input
+                    type="date"
+                    value={dlvFilter.date}
+                    onChange={(e) =>
+                      setDlvFilter((p) => ({ ...p, date: e.target.value }))
+                    }
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-black focus:ring-black text-black"
+                  />
+                </div>
+                <button
+                  onClick={() => setDlvFilter({ q: "", date: "" })}
+                  className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition"
+                >
+                  ล้างตัวกรอง
+                </button>
+                <div className="sm:ml-auto text-sm text-gray-600">
+                  แสดง {filteredDeliveries.length} จาก {deliveries.length}{" "}
+                  รายการ
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-600">
+                      <th className="py-2 pr-3">วันที่/เวลา</th>
+                      <th className="py-2 pr-3">รหัสส่งมอบ</th>
+                      <th className="py-2 pr-3">รหัสจอง</th>
+                      <th className="py-2 pr-3">ลูกค้า</th>
+                      <th className="py-2 pr-3">รถ/ทะเบียน</th>
+                      <th className="py-2 pr-3">สถานที่รับ</th>
+                      <th className="py-2 pr-3">พนักงาน</th>
+                      <th className="py-2 pr-3">รูป</th>
+                      <th className="py-2 pr-3">จัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredDeliveries.map((d) => (
+                      <tr key={d.id}>
+                        <td className="py-2 pr-3 text-gray-700">
+                          <div className="leading-tight">
+                            <div>{fmtDateTimeLocal(d.pickupTime)}</div>
+                            <div className="text-xs text-gray-500">
+                              บันทึก: {fmtDateTimeLocal(d.createdAt)}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-2 pr-3 font-medium text-black">
+                          {d.id}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-800">
+                          {d.bookingCode}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-800">
+                          <div className="leading-tight">
+                            <div>{d.customerName}</div>
+                            <div className="text-xs text-gray-500">
+                              {d.customerPhone}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-2 pr-3 text-gray-700">
+                          {d.carName} / {d.carPlate}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-700">
+                          {d.pickupLocation}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-700">
+                          {d.staff || "-"}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-700">
+                          <div className="text-xs">
+                            ID: {d.idProofs?.length || 0} / CAR:{" "}
+                            {d.carProofs?.length || 0}
+                          </div>
+                        </td>
+                        <td className="py-2 pr-3">
+                          <button
+                            onClick={() => openDlvDetail(d)}
+                            className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 hover:border-gray-400"
+                          >
+                            เปิดดู
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredDeliveries.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={9}
+                          className="py-6 text-center text-gray-500"
+                        >
+                          ไม่พบบันทึกส่งมอบที่ตรงกับตัวกรอง
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </section>
@@ -2430,6 +2685,140 @@ export default function AdminPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ----- Modal: รายละเอียดบันทึกส่งมอบ ----- */}
+      {dlvDetailOpen && dlvDetailItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={closeDlvDetail}
+          />
+          <div className="relative z-10 w-full max-w-4xl bg-white rounded-xl shadow-xl p-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-black">
+                รายละเอียดส่งมอบ — {dlvDetailItem.id} (
+                {dlvDetailItem.bookingCode})
+              </h3>
+              <button
+                onClick={closeDlvDetail}
+                className="text-gray-500 hover:text-gray-700"
+                aria-label="ปิด"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-black">
+              <div className="space-y-1">
+                <div>
+                  ลูกค้า: <b>{dlvDetailItem.customerName}</b>
+                </div>
+                <div>โทร: {dlvDetailItem.customerPhone}</div>
+                <div>เอกสารที่ใช้: {dlvDetailItem.verifyType || "-"}</div>
+                <div>
+                  เงินมัดจำ:{" "}
+                  {dlvDetailItem.depositReceived ? "รับแล้ว" : "ยังไม่รับ"}
+                </div>
+                <div>พนักงานที่บันทึก: {dlvDetailItem.staff || "-"}</div>
+                <div>
+                  บันทึกเมื่อ: {fmtDateTimeLocal(dlvDetailItem.createdAt)}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div>
+                  รถ: {dlvDetailItem.carName} / {dlvDetailItem.carPlate}
+                </div>
+                <div>สถานที่ส่งมอบ: {dlvDetailItem.pickupLocation || "-"}</div>
+                <div>
+                  วัน–เวลาส่งมอบ: {fmtDateTimeLocal(dlvDetailItem.pickupTime)}
+                </div>
+                <div>สถานที่คืน: {dlvDetailItem.returnLocation || "-"}</div>
+                <div>
+                  วัน–เวลาคืน: {fmtDateTimeLocal(dlvDetailItem.returnTime)}
+                </div>
+                <div>น้ำมัน: {dlvDetailItem.fuelLevel || "-"}</div>
+                <div>เลขไมล์: {dlvDetailItem.odometer || "-"}</div>
+              </div>
+            </div>
+
+            {/* หมายเหตุ */}
+            <div className="mt-4 rounded-lg border bg-gray-50 p-3">
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                หมายเหตุ
+              </div>
+              <div className="text-sm text-black whitespace-pre-wrap">
+                {dlvDetailItem?.notes?.trim() || "—"}
+              </div>
+            </div>
+
+            {/* รูปเอกสารยืนยัน */}
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                รูปเอกสารยืนยัน (ID Proofs)
+              </div>
+              {dlvDetailItem.idProofs?.length ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {dlvDetailItem.idProofs.map((u, i) => (
+                    <a
+                      key={i}
+                      href={u}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg overflow-hidden border hover:opacity-90"
+                      title="เปิดรูปเต็ม"
+                    >
+                      <img
+                        src={u}
+                        alt={`id-proof-${i + 1}`}
+                        className="w-full h-32 object-cover"
+                      />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500">— ไม่มีรูป —</div>
+              )}
+            </div>
+
+            {/* รูปสภาพรถ */}
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                รูปสภาพรถ (Car Proofs)
+              </div>
+              {dlvDetailItem.carProofs?.length ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {dlvDetailItem.carProofs.map((u, i) => (
+                    <a
+                      key={i}
+                      href={u}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg overflow-hidden border hover:opacity-90"
+                      title="เปิดรูปเต็ม"
+                    >
+                      <img
+                        src={u}
+                        alt={`car-proof-${i + 1}`}
+                        className="w-full h-32 object-cover"
+                      />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500">— ไม่มีรูป —</div>
+              )}
+            </div>
+
+            <div className="mt-5 flex items-center justify-end">
+              <button
+                onClick={closeDlvDetail}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                ปิด
+              </button>
+            </div>
           </div>
         </div>
       )}
