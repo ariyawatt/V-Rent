@@ -23,6 +23,50 @@ export default function Login() {
     if (savedRemember) setRemember(true);
   }, []);
 
+  /* ---------------- Helpers: user info & admin check ---------------- */
+  const getUserInformation = async (userId) => {
+    // ใช้รูปแบบที่คุณให้มา แต่ใส่ user_id ทาง query และให้เบราว์เซอร์ส่งคุกกี้เอง
+    const url = new URL(
+      "https://demo.erpeazy.com/api/method/erpnext.api.get_user_information"
+    );
+    url.searchParams.set("user_id", userId);
+    const r = await fetch(url.toString(), {
+      method: "GET",
+      credentials: "include",
+      redirect: "follow",
+    });
+    const txt = await r.text();
+    let json;
+    try {
+      json = JSON.parse(txt);
+    } catch {
+      json = { raw: txt };
+    }
+    if (!r.ok) {
+      const msg =
+        json?.message || json?.exc || json?.raw || "Cannot get user info";
+      throw new Error(typeof msg === "string" ? msg : "Cannot get user info");
+    }
+    return json;
+  };
+
+  const isAdminFromInfo = (userId, info) => {
+    const rolesArr =
+      info?.message?.roles || info?.data?.roles || info?.roles || [];
+    const roleNames = Array.isArray(rolesArr)
+      ? rolesArr.map((r) => r?.role || r?.name || r)
+      : [];
+
+    const idIsAdministrator = String(userId).toLowerCase() === "administrator";
+    const hasSystemManager = roleNames.map(String).includes("System Manager");
+    const hasAdministratorRole = roleNames
+      .map(String)
+      .includes("Administrator");
+
+    return idIsAdministrator || hasSystemManager || hasAdministratorRole;
+  };
+  /* ------------------------------------------------------------------ */
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrMsg("");
@@ -39,7 +83,7 @@ export default function Login() {
         credentials: "include",
         redirect: "follow",
         body: JSON.stringify({
-          usr: email, // กรอกในฟอร์ม เช่น "administrator"
+          usr: email, // กรอกในฟอร์ม เช่น "administrator" หรืออีเมล
           pwd: password, // กรอกในฟอร์ม เช่น "ZAQ!@WSX"
         }),
       });
@@ -73,8 +117,20 @@ export default function Login() {
         localStorage.removeItem("vrent_remember");
       }
 
-      // สำเร็จ — ไปหน้าแอดมิน (ปรับ path ได้ตามโปรเจ็กต์ของคุณ)
-      router.push("/adminpage");
+      // ใช้ user_id = email/username ที่ใช้ล็อกอิน ไปเช็คสิทธิ์ผ่าน get_user_information
+      // (เลี่ยงการเรียก method ที่ไม่ whitelist)
+      const info = await getUserInformation(email);
+      const isAdmin = isAdminFromInfo(email, info);
+      console.log("Check if user was admin return true =>", isAdmin);
+
+      // เก็บ flag ไว้ใช้งานหน้าอื่น
+      try {
+        localStorage.setItem("vrent_is_admin", isAdmin ? "1" : "0");
+        localStorage.setItem("vrent_user_id", String(email || ""));
+      } catch {}
+
+      // สำเร็จ — ไปหน้าแอดมินหรือหน้าผู้ใช้ตามสิทธิ์
+      router.push(isAdmin ? "/adminpage" : "/mainpage");
     } catch (err) {
       console.error(err);
       setErrMsg(err?.message || "เกิดข้อผิดพลาดในการเข้าสู่ระบบ");
@@ -368,7 +424,7 @@ export default function Login() {
                     fill="currentColor"
                     xmlns="http://www.w3.org/2000/svg"
                   >
-                    <path d="M22.675 0h-21.35C.595 0 0 .6 0 1.326v21.348C0 23.405.595 24 1.325 24H12.82v-9.294H9.692v-3.622h3.128V8.413c0-3.1 1.894-4.788 4.659-4.788 1.325 0 2.464.099 2.795.143v3.24l-1.918.001c-1.505 0-1.797.716-1.797 1.767v2.318h3.59l-.467 3.622h-3.123V24h6.116C23.405 24 24 23.405 24 22.674V1.326C24 .6 23.405 0 22.675 0z" />
+                    <path d="M22.675 0h-21.35C.595 0 0 .6 0 1.326v21.348C0 23.405.595 24 1.325 24H12.82v-9.294H9.692v-3.622h3.128V8.413c0-3.1 1.894-4.788 4.659-4.788 1.325 0 2.464.099 2.795.143v3.24l-1.918.001c-1.505 0-1.797.716-1.797 1.767v2.318h3.59ล-.467 3.622h-3.123V24h6.116C23.405 24 24 23.405 24 22.674V1.326C24 .6 23.405 0 22.675 0z" />
                   </svg>
                   Facebook
                 </button>

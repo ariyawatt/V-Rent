@@ -2,8 +2,12 @@
 "use client";
 
 import { useMemo, useRef, useState, useEffect } from "react";
+import Link from "next/link";
 import Headers from "@/Components/HeaderAd";
 import Footer from "@/Components/Footer";
+
+/* ───────────── Admin Guard ───────────── */
+const adminTruthy = new Set(["1", "true", "yes", "on"]);
 
 /* ───────────── Utilities ───────────── */
 const cls = (...a) => a.filter(Boolean).join(" ");
@@ -236,6 +240,15 @@ const PayBadge = ({ value }) => {
 
 /* ───────────── Page ───────────── */
 export default function AdminPage() {
+  const [adminChecked, setAdminChecked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = (localStorage.getItem("vrent_is_admin") || "").toLowerCase();
+      setIsAdmin(adminTruthy.has(raw));
+    } catch {}
+    setAdminChecked(true);
+  }, []);
   /* clock for lifecycle */
   const [now, setNow] = useState(new Date());
   useEffect(() => {
@@ -1204,6 +1217,51 @@ export default function AdminPage() {
   };
 
   /* ───────────── Render ───────────── */
+  // ระหว่างตรวจสอบสิทธิ์ (ยังไม่รู้ว่าเป็นแอดมินไหม)
+  if (!adminChecked) {
+    return (
+      <div className="flex min-h-screen flex-col bg-gray-50">
+        <Headers />
+        <main className="flex-1 flex items-center justify-center text-gray-600">
+          กำลังตรวจสอบสิทธิ์...
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  // ถ้าไม่ใช่แอดมิน แสดงหน้า “ไม่มีสิทธิ์เข้าถึง”
+  if (!isAdmin) {
+    return (
+      <div className="flex min-h-screen flex-col bg-gray-50">
+        <Headers />
+        <main className="flex-1 flex items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm">
+            <div className="text-2xl font-semibold text-black mb-1">
+              เข้าถึงไม่ได้
+            </div>
+            <p className="text-gray-600">คุณไม่มีสิทธิ์เข้าถึงหน้านี้</p>
+            <div className="mt-4 flex items-center justify-center gap-2">
+              <Link
+                href="/Login"
+                className="px-4 py-2 rounded-lg bg-black text-white hover:bg-gray-800"
+              >
+                เข้าสู่ระบบ
+              </Link>
+              <Link
+                href="/"
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50"
+              >
+                กลับหน้าหลัก
+              </Link>
+            </div>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
       <Headers />
@@ -2152,9 +2210,7 @@ export default function AdminPage() {
                 />
               </div>
               <div className="md:col-span-3">
-                <label className="block text-xs font-semibold text-black mb-1">
-                  ราคา/วัน (บาท) *
-                </label>
+                <label className="block text-xs font-semibold text-black mb-1"></label>
                 <input
                   type="number"
                   name="pricePerDay"

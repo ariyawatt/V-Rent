@@ -1,34 +1,104 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/FooterMinimal";
 import Link from "next/link";
 
 export default function Signup() {
+  const router = useRouter();
+
   const [form, setForm] = useState({
     name: "",
     email: "",
+    phone: "",
     password: "",
     confirmPassword: "",
   });
   const [showPw, setShowPw] = useState(false);
   const [showPw2, setShowPw2] = useState(false);
   const [error, setError] = useState(null);
+  const [okMsg, setOkMsg] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value ?? "" }));
     setError(null);
+    setOkMsg("");
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError(null);
+    setOkMsg("");
+
+    // validation เบื้องต้น
+    const phoneOk = /^[0-9]{9,15}$/.test(form.phone.trim());
+    if (!phoneOk) {
+      setError("กรุณากรอกเบอร์โทรเป็นตัวเลข 9–15 หลัก");
+      return;
+    }
     if (form.password !== form.confirmPassword) {
       setError("Passwords do not match.");
       return;
     }
-    console.log("Signup data:", form);
-    // TODO: call API signup
+
+    setLoading(true);
+    try {
+      const res = await fetch(
+        "https://demo.erpeazy.com/api/method/erpnext.api.sign_up",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // ไม่ต้องแนบคุกกี้พิเศษ แต่ใส่ include ได้เผื่อมีการตั้งค่า session ฝั่งเซิร์ฟเวอร์
+          credentials: "include",
+          body: JSON.stringify({
+            email: form.email,
+            full_name: form.name,
+            password: form.password,
+            phone: form.phone,
+          }),
+          redirect: "follow",
+        }
+      );
+
+      const raw = await res.text();
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = { raw };
+      }
+
+      if (!res.ok) {
+        // พยายามดึงข้อความจาก response
+        const msg =
+          data?.message ||
+          data?.exc ||
+          data?.raw ||
+          "Sign up failed. Please try again.";
+        throw new Error(typeof msg === "string" ? msg : "Sign up failed");
+      }
+
+      // ส่วนใหญ่ ERPNext จะส่ง message success กลับมา
+      setOkMsg("สมัครสมาชิกสำเร็จ! กำลังพาไปหน้า Login...");
+      // เคลียร์ฟอร์มเล็กน้อย
+      setForm((p) => ({
+        ...p,
+        password: "",
+        confirmPassword: "",
+      }));
+
+      // ไปหน้า Login
+      router.push("/Login");
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || "เกิดข้อผิดพลาดในการสมัครสมาชิก");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -58,15 +128,10 @@ export default function Signup() {
 
       <main className="flex flex-1 items-center justify-center p-4">
         <div className="w-full max-w-md">
-          {/* glass card */}
           <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-2xl shadow-black/40">
             <div className="px-8 pt-8 pb-6">
-              {/* V-Rent icon */}
-              <div
-                className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full 
-                bg-gradient-to-br from-[#1B1B2F] to-[#0A0A12] 
-                shadow-2xl ring-2 ring-indigo-500/60"
-              >
+              {/* โลโก้ */}
+              <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-[#1B1B2F] to-[#0A0A12] shadow-2xl ring-2 ring-indigo-500/60">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   width="56"
@@ -109,6 +174,7 @@ export default function Signup() {
                     value={form.name}
                     onChange={handleChange}
                     placeholder="Your name"
+                    autoComplete="name"
                     required
                     className="w-full rounded-xl border border-white/10 bg-[#0F1530]/60 px-4 py-3 text-sm placeholder:text-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
                   />
@@ -125,6 +191,26 @@ export default function Signup() {
                     value={form.email}
                     onChange={handleChange}
                     placeholder="you@domain.com"
+                    autoComplete="email"
+                    required
+                    className="w-full rounded-xl border border-white/10 bg-[#0F1530]/60 px-4 py-3 text-sm placeholder:text-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
+                  />
+                </label>
+
+                {/* Phone */}
+                <label className="block">
+                  <span className="mb-2 block text-sm text-slate-300">
+                    Phone Number
+                  </span>
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={form.phone}
+                    onChange={handleChange}
+                    placeholder="0812345678"
+                    inputMode="numeric"
+                    pattern="[0-9]{9,15}"
+                    autoComplete="tel"
                     required
                     className="w-full rounded-xl border border-white/10 bg-[#0F1530]/60 px-4 py-3 text-sm placeholder:text-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
                   />
@@ -142,6 +228,8 @@ export default function Signup() {
                       value={form.password}
                       onChange={handleChange}
                       placeholder="••••••••"
+                      autoComplete="new-password"
+                      minLength={8}
                       required
                       className="w-full rounded-xl border border-white/10 bg-[#0F1530]/60 px-4 py-3 pr-10 text-sm placeholder:text-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
                     />
@@ -207,6 +295,8 @@ export default function Signup() {
                       value={form.confirmPassword}
                       onChange={handleChange}
                       placeholder="••••••••"
+                      autoComplete="new-password"
+                      minLength={8}
                       required
                       className="w-full rounded-xl border border-white/10 bg-[#0F1530]/60 px-4 py-3 pr-10 text-sm placeholder:text-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
                     />
@@ -260,14 +350,20 @@ export default function Signup() {
                   </div>
                 </label>
 
+                {/* error / success */}
                 {error && <p className="text-red-300 text-sm -mt-2">{error}</p>}
+                {okMsg && (
+                  <p className="text-emerald-300 text-sm -mt-2">{okMsg}</p>
+                )}
 
                 {/* CTA */}
                 <button
                   type="submit"
-                  className="mt-2 w-full rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-900/40 transition hover:from-indigo-400 hover:to-violet-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                  disabled={loading}
+                  aria-busy={loading}
+                  className="mt-2 w-full rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-900/40 transition hover:from-indigo-400 hover:to-violet-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Sign Up
+                  {loading ? "Signing up..." : "Sign Up"}
                 </button>
               </form>
 
@@ -278,12 +374,13 @@ export default function Signup() {
                 <div className="h-px flex-1 bg-white/10" />
               </div>
 
-              {/* OAuth buttons (ตัวอย่าง/ใส่จริงค่อยเชื่อม NextAuth) */}
+              {/* OAuth buttons */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button
                   type="button"
                   className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm hover:bg-white/10"
                 >
+                  {/* Google */}
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     viewBox="0 0 533.5 544.3"
@@ -314,6 +411,7 @@ export default function Signup() {
                   type="button"
                   className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm hover:bg-white/10"
                 >
+                  {/* Facebook */}
                   <svg
                     width="18"
                     height="18"
