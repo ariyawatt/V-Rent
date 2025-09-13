@@ -8,52 +8,152 @@ import Image from "next/image";
 import Link from "next/link";
 import { getCarById } from "@/data/cars";
 
+/* ---------- Helpers ---------- */
 function toLocalDateTimeInputValue(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
-  const y = d.getFullYear();
-  const m = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  const hh = pad(d.getHours());
-  const mm = pad(d.getMinutes());
-  return `${y}-${m}-${day}T${hh}:${mm}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
+}
+function isoToLocalInput(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? "" : toLocalDateTimeInputValue(d);
 }
 function diffDays(a, b) {
   const ms = new Date(b) - new Date(a);
   const days = Math.ceil(ms / (1000 * 60 * 60 * 24));
   return Math.max(days, 1);
 }
-const toBool = (v) => String(v).toLowerCase() === "true";
+const toBool = (v) => String(v ?? "").toLowerCase() === "true";
 
+/* อ่านค่า string แบบปลอดภัย */
+const get = (sp, key, fallback = "") => sp.get(key) ?? fallback;
+
+/* ---------- Page ---------- */
 export default function BookingPage() {
-  // ✅ ใช้ hooks ของ Next.js 15
   const params = useParams();
   const search = useSearchParams();
 
+  // id จาก path (อาจเป็น slug หรือ docname จริง)
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
-  const car = useMemo(() => getCarById(String(id)), [id]);
+
+  // ---------- ดึง "ข้อมูลรถจาก query" ถ้ามี ----------
+  // แนะนำให้ส่งค่าตามนี้มาจากหน้า /cars/[id] ตอนกด "จองรถคันนี้":
+  // &carName=&carBrand=&carType=&carYear=&carTransmission=&carSeats=&carFuel=
+  // &pricePerDay=&companyName=&companySlug=&carImage=
+  const carFromQuery = {
+    id: id,
+    name: get(search, "carName"),
+    brand: get(search, "carBrand"),
+    type: get(search, "carType"),
+    year: get(search, "carYear"),
+    transmission: get(search, "carTransmission"),
+    seats: get(search, "carSeats"),
+    fuel: get(search, "carFuel"),
+    pricePerDay: Number(get(search, "pricePerDay") || 0),
+    company: {
+      name: get(search, "companyName"),
+      slug: get(search, "companySlug"),
+    },
+    image: get(search, "carImage"),
+  };
+
+  // ถ้า query ไม่มี ให้ fallback เป็น mock
+  const carFallback = useMemo(() => getCarById(String(id)), [id]);
+
+  // รวมเป็น car ปัจจุบัน (query > fallback)
+  const car = useMemo(() => {
+    const c = carFromQuery;
+    const hasQueryCar =
+      c.name ||
+      c.brand ||
+      c.type ||
+      c.pricePerDay ||
+      c.image ||
+      c.company?.name;
+    if (hasQueryCar) {
+      return {
+        id,
+        name: c.name || carFallback?.name || "Vehicle",
+        brand: c.brand || carFallback?.brand || "",
+        type: c.type || carFallback?.type || "",
+        year: c.year || carFallback?.year || "",
+        transmission: c.transmission || carFallback?.transmission || "",
+        seats: c.seats || carFallback?.seats || "",
+        fuel: c.fuel || carFallback?.fuel || "",
+        pricePerDay: Number(c.pricePerDay || carFallback?.pricePerDay || 0),
+        company: {
+          name:
+            c.company?.name || carFallback?.company?.name || "V-Rent Partner",
+          slug:
+            c.company?.slug ||
+            carFallback?.company?.slug ||
+            (c.company?.name || "partner").toLowerCase().replace(/\s+/g, "-"),
+        },
+        image: c.image || carFallback?.image || "/noimage.jpg",
+        description: carFallback?.description || "",
+      };
+    }
+    return carFallback
+      ? carFallback
+      : {
+          id,
+          name: "Vehicle",
+          brand: "",
+          type: "",
+          year: "",
+          transmission: "",
+          seats: "",
+          fuel: "",
+          pricePerDay: 0,
+          company: { name: "V-Rent Partner", slug: "partner" },
+          image: "/noimage.jpg",
+          description: "",
+        };
+  }, [carFromQuery, carFallback, id]);
+
+  // ---------- เงื่อนไขจากหน้าแรกที่ถูกส่งต่อ ----------
+  const pickup_at_iso = get(search, "pickup_at");
+  const return_at_iso = get(search, "return_at");
+  const pickupAt_q = get(search, "pickupAt");
+  const dropoffAt_q = get(search, "dropoffAt");
+  const key = get(search, "key"); // ถ้ามี
+
+  const passengers = Number(get(search, "passengers") || 1);
+  const promo = get(search, "promo");
+  const ftype = get(search, "ftype");
+  const pickupLocation_q = get(search, "pickupLocation");
+  const dropoffLocation_q = get(search, "dropoffLocation");
 
   const now = new Date();
   const defaultPick = new Date(now.getTime() + 2 * 60 * 60 * 1000);
   const defaultDrop = new Date(defaultPick.getTime() + 24 * 60 * 60 * 1000);
 
-  // ✅ พรีฟิลจาก query
+  // ---------- พรีฟิลฟอร์ม ----------
   const [form, setForm] = useState({
-    pickupLocation: search.get("pickupLocation") || "",
-    dropoffLocation: search.get("dropoffLocation") || "",
-    pickupAt: search.get("pickupAt") || toLocalDateTimeInputValue(defaultPick),
+    pickupLocation: pickupLocation_q || "",
+    dropoffLocation: dropoffLocation_q || "",
+    pickupAt:
+      isoToLocalInput(pickup_at_iso) ||
+      pickupAt_q ||
+      toLocalDateTimeInputValue(defaultPick),
     dropoffAt:
-      search.get("dropoffAt") || toLocalDateTimeInputValue(defaultDrop),
-    name: search.get("name") || "",
-    phone: search.get("phone") || "",
-    email: search.get("email") || "",
+      isoToLocalInput(return_at_iso) ||
+      dropoffAt_q ||
+      toLocalDateTimeInputValue(defaultDrop),
+    name: get(search, "name"),
+    phone: get(search, "phone"),
+    email: get(search, "email"),
     extras: {
-      childSeat: toBool(search.get("childSeat")),
-      gps: toBool(search.get("gps")),
-      fullInsurance: toBool(search.get("fullInsurance")),
+      childSeat: toBool(get(search, "childSeat")),
+      gps: toBool(get(search, "gps")),
+      fullInsurance: toBool(get(search, "fullInsurance")),
     },
-    note: search.get("note") || "",
+    note: get(search, "note"),
   });
 
+  // ---------- คำนวณราคา ----------
   const dayCount = useMemo(
     () => diffDays(form.pickupAt, form.dropoffAt),
     [form.pickupAt, form.dropoffAt]
@@ -77,16 +177,6 @@ export default function BookingPage() {
     }
   }, [form.pickupAt]);
 
-  if (!car) {
-    return (
-      <div className="min-h-screen bg-white">
-        <Headers />
-        <main className="max-w-4xl mx-auto p-6">ไม่พบรถคันนี้</main>
-        <Footer />
-      </div>
-    );
-  }
-
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     if (name.startsWith("extras.")) {
@@ -97,14 +187,11 @@ export default function BookingPage() {
     }
   };
 
-  const minDateTime = toLocalDateTimeInputValue(now);
-
+  const minDateTime = toLocalDateTimeInputValue(new Date());
   const labelCls = "text-sm font-semibold text-slate-800";
   const inputCls =
     "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black";
   const cardCls = "bg-white rounded-2xl shadow-lg border border-slate-200";
-
-  // ✅ เก็บ query เดิมทั้งหมด ใช้ส่งต่อหรือลิงก์ย้อนกลับ
   const passthroughQS = search.toString();
 
   return (
@@ -113,16 +200,51 @@ export default function BookingPage() {
 
       <main className="flex-grow">
         <div className="max-w-6xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-8">
+          {/* แถบสรุปเงื่อนไขที่ถูกส่งต่อมา */}
+          <div className="lg:col-span-2 -mt-2">
+            <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm flex flex-wrap gap-x-6 gap-y-2">
+              <span>
+                รับ: <b>{pickup_at_iso || form.pickupAt}</b>
+              </span>
+              <span>
+                คืน: <b>{return_at_iso || form.dropoffAt}</b>
+              </span>
+              {passengers ? (
+                <span>
+                  ผู้โดยสาร: <b>{passengers}</b>
+                </span>
+              ) : null}
+              {ftype ? (
+                <span>
+                  ประเภทรถ: <b>{ftype}</b>
+                </span>
+              ) : null}
+              {promo ? (
+                <span>
+                  โค้ดส่วนลด: <b>{promo}</b>
+                </span>
+              ) : null}
+              {key ? (
+                <span>
+                  key: <b>{key}</b>
+                </span>
+              ) : null}
+            </div>
+          </div>
+
           {/* ซ้าย: ฟอร์มจอง */}
           <section className={`${cardCls} p-6 md:p-8`}>
             {/* Header รถ */}
             <div className="flex items-start gap-4">
               <div className="relative w-28 h-20 rounded-lg overflow-hidden border border-slate-200 shadow-sm">
                 <Image
-                  src={car.image}
+                  src={car.image || "/noimage.jpg"}
                   alt={car.name}
                   fill
                   className="object-cover"
+                  sizes="112px"
+                  // ถ้าโดเมนรูปยังไม่ถูก allow ใน next.config ให้เปิดบรรทัดนี้ชั่วคราว
+                  // unoptimized
                 />
               </div>
               <div className="min-w-0">
@@ -130,15 +252,17 @@ export default function BookingPage() {
                   {car.name}
                 </h1>
                 <p className="text-sm md:text-base text-slate-700">
-                  {car.brand} • {car.type} • {car.year} • {car.transmission}
+                  {car.brand} {car.brand && car.type ? "•" : ""} {car.type}
+                  {car.year ? ` • ${car.year}` : ""}
+                  {car.transmission ? ` • ${car.transmission}` : ""}
                 </p>
                 <p className="mt-1 text-sm">
                   ผู้ให้บริการ:{" "}
                   <Link
-                    href={`/companies/${car.company.slug}`}
+                    href={`/companies/${car.company?.slug || "partner"}`}
                     className="font-semibold underline underline-offset-4 hover:text-black"
                   >
-                    {car.company.name}
+                    {car.company?.name || "V-Rent Partner"}
                   </Link>
                 </p>
               </div>
@@ -289,21 +413,23 @@ export default function BookingPage() {
               {/* ปุ่ม */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2">
                 <Link
-                  href={`/cars/${car.id}${
+                  href={`/cars/${encodeURIComponent(id)}${
                     passthroughQS ? `?${passthroughQS}` : ""
                   }`}
                   className="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-center"
                 >
                   กลับไปหน้ารถ
                 </Link>
+
                 <button
                   type="button"
                   onClick={() => {
                     const qp = new URLSearchParams({
-                      pickupLocation: form.pickupLocation,
-                      dropoffLocation: form.dropoffLocation,
+                      // เวอร์ชัน camelCase
                       pickupAt: form.pickupAt,
                       dropoffAt: form.dropoffAt,
+                      pickupLocation: form.pickupLocation,
+                      dropoffLocation: form.dropoffLocation,
                       name: form.name,
                       phone: form.phone,
                       email: form.email,
@@ -311,8 +437,30 @@ export default function BookingPage() {
                       gps: String(form.extras.gps),
                       fullInsurance: String(form.extras.fullInsurance),
                       note: form.note,
+
+                      // ส่งต่อข้อมูลรถทั้งหมดที่มี (จาก query เดิม + fallback)
                       carId: String(car.id),
+                      carName: car.name,
+                      carBrand: car.brand,
+                      carType: car.type,
+                      carYear: String(car.year || ""),
+                      carTransmission: car.transmission || "",
+                      carSeats: String(car.seats || ""),
+                      carFuel: car.fuel || "",
+                      pricePerDay: String(car.pricePerDay || 0),
+                      companyName: car.company?.name || "",
+                      companySlug: car.company?.slug || "",
+                      carImage: car.image || "",
+
+                      // เผื่อฝั่งถัดไปอยากใช้แบบ ISO
+                      pickup_at: new Date(form.pickupAt).toISOString(),
+                      return_at: new Date(form.dropoffAt).toISOString(),
+                      passengers: String(passengers || ""),
+                      promo: promo || "",
+                      ftype: ftype || "",
+                      key: key || "",
                     }).toString();
+
                     window.location.href = `/payment/choose?${qp}`;
                   }}
                   className="px-5 py-2.5 rounded-lg bg-black text-white font-semibold hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black text-center"
@@ -337,20 +485,20 @@ export default function BookingPage() {
               </div>
               <div className="flex justify-between">
                 <span>ราคา/วัน</span>
-                <span>฿{car.pricePerDay.toLocaleString()}</span>
+                <span>฿{Number(car.pricePerDay || 0).toLocaleString()}</span>
               </div>
               <hr className="my-3 border-slate-200" />
               <div className="flex justify-between">
                 <span>ราคารถ (x{dayCount})</span>
-                <span>฿{basePrice.toLocaleString()}</span>
+                <span>฿{Number(basePrice).toLocaleString()}</span>
               </div>
               <div className="flex justify-between">
                 <span>ราคาตัวเลือก (รวม)</span>
-                <span>฿{extrasPrice.toLocaleString()}</span>
+                <span>฿{Number(extrasPrice).toLocaleString()}</span>
               </div>
               <div className="flex justify-between text-lg font-extrabold mt-2">
                 <span>รวมทั้งหมด</span>
-                <span>฿{total.toLocaleString()}</span>
+                <span>฿{Number(total).toLocaleString()}</span>
               </div>
             </div>
           </aside>

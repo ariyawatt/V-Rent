@@ -1,7 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
+
+const carTypeToFType = {
+  any: undefined,
+  eco: "ECO",
+  sedan: "SEDAN",
+  suv: "SUV",
+  pickup: "PICKUP",
+  van: "VAN",
+};
+
+// รวม date + time เป็น ISO (ตามเวลาท้องถิ่นผู้ใช้)
+function toLocalISO(dateStr, timeStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [hh = 0, mm = 0] = (timeStr || "00:00").split(":").map(Number);
+  const dt = new Date(y, (m || 1) - 1, d, hh, mm, 0, 0);
+  return dt.toISOString();
+}
 
 export default function BookingBox({ onSearch }) {
   const [form, setForm] = useState({
@@ -25,8 +42,21 @@ export default function BookingBox({ onSearch }) {
     }));
   };
 
+  const canSubmit = useMemo(() => {
+    const required = [
+      "pickupLocation",
+      "pickupDate",
+      "pickupTime",
+      "returnDate",
+      "returnTime",
+    ];
+    return required.every((k) => !!form[k]);
+  }, [form]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
+
+    // 1) ตรวจฟิลด์ที่จำเป็น
     const required = [
       "pickupLocation",
       "pickupDate",
@@ -39,20 +69,48 @@ export default function BookingBox({ onSearch }) {
       alert("กรุณากรอกข้อมูลให้ครบ: " + missing.join(", "));
       return;
     }
+
+    // 2) ตรวจวัน-เวลาคืนต้องหลังวัน-เวลารับ
+    const pickupISO = toLocalISO(form.pickupDate, form.pickupTime);
+    const returnISO = toLocalISO(form.returnDate, form.returnTime);
+    if (new Date(returnISO) <= new Date(pickupISO)) {
+      alert("เวลาคืนรถต้องช้ากว่าเวลารับรถ");
+      return;
+    }
+
+    // 3) เตรียม payload สำหรับ backend / ERP
     const payload = {
-      ...form,
-      dropoffLocation: form.returnSame
+      // ฟิลด์จาก UI
+      pickup_location: form.pickupLocation,
+      dropoff_location: form.returnSame
         ? form.pickupLocation
-        : form.dropoffLocation,
-      passengers: Number(form.passengers),
+        : form.dropoffLocation || "",
+      pickup_at: pickupISO, // ISO string
+      return_at: returnISO, // ISO string
+      passengers: Number(form.passengers) || 1,
+      promo: form.promo?.trim() || "",
+
+      // แม็ป carType → ftype (ถ้า any จะไม่ส่ง ftype)
+      ...(carTypeToFType[form.carType]
+        ? { ftype: carTypeToFType[form.carType] }
+        : {}),
+
+      // เก็บค่าดิบไว้ด้วย เผื่อฝั่งผลลัพธ์อยากใช้
+      _raw: { ...form },
     };
-    onSearch?.(payload);
-    console.log("Booking search:", payload);
+
+    // 4) ยิงออกไปให้ผู้ปกครอง (Home) จัดการ fetch
+    try {
+      onSearch?.(payload);
+    } catch (err) {
+      console.error("onSearch error:", err);
+    }
+
+    console.log("Booking search payload:", payload);
   };
 
   return (
     <section className="w-full flex justify-center text-black overflow-x-hidden">
-      {/* MOBILE WRAPPER: จำกัดความกว้างบนจอเล็กกันล้น */}
       <div className="w-full max-w-[640px] md:max-w-6xl px-4 md:px-6">
         <form
           onSubmit={handleSubmit}
@@ -228,9 +286,11 @@ export default function BookingBox({ onSearch }) {
 
             {/* Submit */}
             <div className="md:col-span-12 flex justify-end">
-              <Link
-                href="/carbox"
-                className="w-full md:w-auto inline-flex items-center justify-center gap-2 px-5 md:px-6 py-3 rounded-xl md:rounded-2xl bg-black text-white font-semibold hover:bg-gray-800 active:scale-[.99] transition"
+              <button
+                type="submit"
+                disabled={!canSubmit}
+                className="w-full md:w-auto inline-flex items-center justify-center gap-2 px-5 md:px-6 py-3 rounded-xl md:rounded-2xl bg-black text-white font-semibold hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed active:scale-[.99] transition"
+                title={!canSubmit ? "กรอกข้อมูลที่จำเป็นให้ครบก่อน" : ""}
               >
                 ค้นหารถว่าง
                 <svg
@@ -242,7 +302,7 @@ export default function BookingBox({ onSearch }) {
                   <path d="M13.5 4.5a.75.75 0 0 1 .75-.75h5.25a.75.75 0 0 1 .75.75v5.25a.75.75 0 0 1-1.5 0V6.31l-7.22 7.22a.75.75 0 1 1-1.06-1.06l7.22-7.22h-3.44a.75.75 0 0 1-.75-.75Z" />
                   <path d="M3.75 5.25A2.25 2.25 0 0 1 6 3h5.25a.75.75 0 0 1 0 1.5H6A.75.75 0 0 0 5.25 5.25v12A.75.75 0 0 0 6 18h12a.75.75 0 0 0 .75-.75V12a.75.75 0 0 1 1.5 0v5.25A2.25 2.25 0 0 1 18 19.5H6A2.25 2.25 0 0 1 3.75 17.25v-12Z" />
                 </svg>
-              </Link>
+              </button>
             </div>
           </div>
 

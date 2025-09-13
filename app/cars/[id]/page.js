@@ -1,49 +1,201 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/Footer";
 import Image from "next/image";
 import Link from "next/link";
-import { getCarById } from "@/data/cars";
 
+/* ===== Helpers ===== */
+const IMG_BASE = process.env.NEXT_PUBLIC_ERP_BASE || "https://demo.erpeazy.com";
+
+const slugify = (v) =>
+  String(v ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+
+function normalizeImage(u) {
+  if (!u) return "/noimage.jpg";
+  let s = String(u).trim();
+  if (s.startsWith("//")) s = "https:" + s;
+  if (s.startsWith("/")) s = IMG_BASE.replace(/\/+$/, "") + s;
+  if (!/^https?:\/\//i.test(s))
+    s = IMG_BASE.replace(/\/+$/, "") + "/" + s.replace(/^\/+/, "");
+  return encodeURI(s);
+}
+
+const fmtBaht = (n) => {
+  const x = Number(n);
+  return Number.isFinite(x) ? x.toLocaleString() : "-";
+};
+
+function fmtRange(pickupISO, returnISO) {
+  if (!pickupISO || !returnISO) return "—";
+  try {
+    const p = new Date(pickupISO);
+    const r = new Date(returnISO);
+    const d = { year: "numeric", month: "short", day: "numeric" };
+    const t = { hour: "2-digit", minute: "2-digit" };
+    return `${p.toLocaleDateString(undefined, d)} ${p.toLocaleTimeString(
+      undefined,
+      t
+    )} → ${r.toLocaleDateString(undefined, d)} ${r.toLocaleTimeString(
+      undefined,
+      t
+    )}`;
+  } catch {
+    return "—";
+  }
+}
+
+/* ===== Page ===== */
 export default function CarInfo() {
   const [open, setOpen] = useState(false);
+  const [vehicle, setVehicle] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
 
-  // ✅ Next.js 15: ใช้ useParams แทนการรับ { params } ตรง ๆ
   const params = useParams();
-  const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
+  const idSlug = useMemo(
+    () => (Array.isArray(params?.id) ? params.id[0] : params?.id),
+    [params]
+  );
 
-  // ✅ รับ query และส่งต่อได้
   const search = useSearchParams();
-  const queryTail = search.toString() ? `?${search.toString()}` : "";
+  const rawKey = search.get("key") || "";
 
-  // หารถจาก id (memo กัน re-render)
-  const car = useMemo(() => getCarById(String(id)), [id]);
+  // เวลา/เงื่อนไข
+  const pickup_at = search.get("pickup_at") || "";
+  const return_at = search.get("return_at") || "";
+  const passengers = Number(search.get("passengers") || 1);
+  const promo = search.get("promo") || "";
+  const ftype = search.get("ftype") || "";
 
-  useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && setOpen(false);
-    if (open) document.addEventListener("keydown", onKey);
-    document.body.style.overflow = open ? "hidden" : "";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [open]);
+  // สถานที่รับ-คืน (รองรับทั้ง camelCase และ snake_case)
+  const returnSameParam = search.get("returnSame") ?? search.get("return_same");
+  const returnSame =
+    (returnSameParam ?? "true").toString().toLowerCase() === "true";
 
-  // Fallback ถ้าไม่พบรถ
-  if (!car) {
-    return (
-      <div className="min-h-screen bg-white">
-        <Headers />
-        <main className="p-10">ไม่พบรถคันนี้</main>
-        <Footer />
-      </div>
-    );
+  const pickupLocation =
+    search.get("pickupLocation") || search.get("pickup_location") || "";
+
+  let dropoffLocation =
+    search.get("dropoffLocation") || search.get("dropoff_location") || "";
+
+  if (!dropoffLocation && returnSame) {
+    dropoffLocation = pickupLocation;
   }
 
-  const companyHref = `/companies/${car.company.slug}`;
+  // โหลดข้อมูลคันนี้
+  useEffect(() => {
+    const ac = new AbortController();
+    (async () => {
+      setLoading(true);
+      setErr("");
+
+      try {
+        const payload = {
+          ...(rawKey ? { name: rawKey, vehicle_id: rawKey, id: rawKey } : {}),
+          ...(pickup_at ? { pickup_at } : {}),
+          ...(return_at ? { return_at } : {}),
+          ...(passengers ? { passengers } : {}),
+          ...(promo ? { promo } : {}),
+          ...(ftype ? { ftype } : {}),
+        };
+
+        const res = await fetch("/api/vehicles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: ac.signal,
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
+        const list = Array.isArray(data?.message)
+          ? data.message
+          : Array.isArray(data)
+          ? data
+          : data
+          ? [data]
+          : [];
+
+        const wantSlug = slugify(idSlug);
+        const wantRaw = String(rawKey || idSlug);
+
+        const match = list.find((x) => {
+          const cand = [x.id, x.name, x.vehicle_id, x.vehicle_name, x.plate_no]
+            .filter(Boolean)
+            .map(String);
+          if (cand.some((v) => v === wantRaw)) return true;
+          if (cand.some((v) => slugify(v) === wantSlug)) return true;
+          return false;
+        });
+
+        if (!match) {
+          setVehicle(null);
+          setErr("NOT_FOUND");
+        } else {
+          setVehicle(match);
+        }
+      } catch (e) {
+        if (e.name !== "AbortError") {
+          setVehicle(null);
+          setErr(String(e));
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => ac.abort();
+  }, [idSlug, rawKey, pickup_at, return_at, passengers, promo, ftype]);
+
+  /* ===== Derived fields ===== */
+  const rangeText = useMemo(
+    () => fmtRange(pickup_at, return_at),
+    [pickup_at, return_at]
+  );
+
+  const name = vehicle?.vehicle_name || vehicle?.name || "รถเช่า";
+  const brand = vehicle?.brand || "";
+  const type = vehicle?.ftype || vehicle?.type || "";
+  const pricePerDay =
+    vehicle?.price_per_day ?? vehicle?.price ?? vehicle?.rate_per_day;
+  const companyName =
+    vehicle?.company || vehicle?.company_name || "V-Rent Partner";
+  const companySlug = slugify(companyName || "partner");
+  const imageUrl = normalizeImage(
+    vehicle?.vehicle_image || vehicle?.image || vehicle?.cover
+  );
+
+  /* เตรียม query ส่งต่อไปหน้า booking (รวมสถานที่รับ-คืน) */
+  const forward = new URLSearchParams(search.toString());
+  forward.set("key", rawKey || idSlug);
+  forward.set("carName", name);
+  forward.set("carBrand", brand);
+  forward.set("carType", type);
+  if (vehicle?.year) forward.set("carYear", String(vehicle.year));
+  if (vehicle?.transmission)
+    forward.set("carTransmission", String(vehicle.transmission));
+  if (vehicle?.seats) forward.set("carSeats", String(vehicle.seats));
+  if (vehicle?.fuel) forward.set("carFuel", String(vehicle.fuel));
+  if (pricePerDay != null) forward.set("pricePerDay", String(pricePerDay));
+  forward.set("companyName", companyName);
+  forward.set("companySlug", companySlug);
+  forward.set("carImage", imageUrl);
+
+  // สถานที่
+  if (pickupLocation) forward.set("pickupLocation", pickupLocation);
+  if (dropoffLocation) forward.set("dropoffLocation", dropoffLocation);
+  forward.set("returnSame", String(returnSame));
+
+  const bookHref = `/booking/${encodeURIComponent(
+    rawKey || idSlug
+  )}?${forward.toString()}`;
 
   return (
     <div className="flex flex-col min-h-screen bg-white">
@@ -51,29 +203,27 @@ export default function CarInfo() {
 
       <main className="flex-grow bg-gray-100 grid content-center">
         <div className="w-full bg-white rounded-none shadow-lg overflow-hidden grid grid-cols-1 md:grid-cols-2">
-          {/* รูปซ้าย (กดเพื่อเปิดเต็มจอ) */}
+          {/* รูปซ้าย */}
           <button
             type="button"
             onClick={() => setOpen(true)}
             className="relative w-full h-[42vh] md:h-[70vh] cursor-zoom-in group"
             aria-label="ดูรูปแบบเต็มจอ"
+            disabled={loading}
           >
-            {/* ป้ายบริษัท (คลิกได้) */}
-            <Link
-              href={companyHref}
-              onClick={(e) => e.stopPropagation()}
-              className="absolute left-3 top-3 z-10 rounded-full bg-black/75 text-white text-xs px-2 py-1 hover:bg-black/85 focus:outline-none focus:ring-2 focus:ring-white/60"
-            >
-              {car.company.name}
-            </Link>
+            <span className="absolute left-3 top-3 z-10 rounded-full bg-black/75 text-white text-xs px-2 py-1">
+              {companyName}
+            </span>
 
             <Image
-              src={car.image}
-              alt={car.name}
+              src={imageUrl}
+              alt={name}
               fill
               className="object-cover"
+              sizes="100vw"
               priority
             />
+
             <span className="absolute right-3 bottom-3 rounded-md bg-black/60 text-white px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition">
               ดูแบบเต็มจอ
             </span>
@@ -83,30 +233,83 @@ export default function CarInfo() {
           <div className="flex h-full flex-col justify-between p-6 md:p-10">
             <div>
               <h1 className="text-3xl md:text-4xl font-bold mb-2 text-black">
-                {car.name}
+                {name}
               </h1>
-              <p className="text-gray-700">
-                {car.brand} • {car.type}
-              </p>
+
+              {(brand || type) && (
+                <p className="text-gray-700">
+                  {brand}
+                  {brand && type ? " • " : ""}
+                  {type}
+                </p>
+              )}
 
               <p className="text-2xl font-semibold text-black mt-4 mb-6">
-                {car.pricePerDay.toLocaleString()} บาท/วัน
+                {fmtBaht(pricePerDay)} บาท/วัน
               </p>
 
+              <div className="mb-6 rounded-xl border border-gray-200 p-4 bg-gray-50">
+                <div className="text-sm text-gray-600">ช่วงเวลาที่เลือก</div>
+                <div className="font-semibold text-black">{rangeText}</div>
+
+                {/* โชว์สถานที่รับ/คืน */}
+                {(pickupLocation || dropoffLocation) && (
+                  <div className="mt-2 text-xs text-gray-700 space-y-1">
+                    {pickupLocation && (
+                      <div>
+                        จุดรับรถ:{" "}
+                        <span className="font-medium">{pickupLocation}</span>
+                      </div>
+                    )}
+                    {dropoffLocation && (
+                      <div>
+                        จุดคืนรถ:{" "}
+                        <span className="font-medium">{dropoffLocation}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {passengers ? (
+                  <div className="text-xs text-gray-600 mt-2">
+                    ผู้โดยสาร: {passengers}
+                    {ftype ? ` • ประเภท: ${ftype}` : ""}
+                  </div>
+                ) : null}
+              </div>
+
               <ul className="space-y-2 text-gray-800 mb-6">
-                <li>ปี: {car.year}</li>
-                <li>จำนวนที่นั่ง: {car.seats}</li>
-                <li>ระบบเกียร์: {car.transmission}</li>
-                <li>เชื้อเพลิง: {car.fuel}</li>
+                {vehicle?.year && <li>ปี: {vehicle.year}</li>}
+                {vehicle?.seats && <li>จำนวนที่นั่ง: {vehicle.seats}</li>}
+                {vehicle?.transmission && (
+                  <li>ระบบเกียร์: {vehicle.transmission}</li>
+                )}
+                {vehicle?.fuel && <li>เชื้อเพลิง: {vehicle.fuel}</li>}
+                {vehicle?.plate_no && <li>ทะเบียน: {vehicle.plate_no}</li>}
               </ul>
 
-              <p className="text-gray-700">{car.description}</p>
+              {vehicle?.description && (
+                <p className="text-gray-700 whitespace-pre-line">
+                  {vehicle.description}
+                </p>
+              )}
+
+              {err && err !== "NOT_FOUND" && (
+                <p className="text-xs text-red-500 mt-2">
+                  โหลดข้อมูลไม่สำเร็จ: {err}
+                </p>
+              )}
+              {err === "NOT_FOUND" && (
+                <p className="text-xs text-red-500 mt-2">
+                  ไม่พบรถคันนี้จากข้อมูลที่ส่งมา
+                </p>
+              )}
             </div>
 
             <div className="mt-8">
               <Link
-                href={`/booking/${car.id}${queryTail}`} // ✅ ส่ง query ต่อไปด้วย
-                className="inline-block w-full md:w-auto px-6 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition text-center"
+                href={bookHref}
+                className="inline-block w-full md:w-auto px-6 py-3 rounded-lg transition text-center bg-black text-white hover:bg-gray-800"
               >
                 จองรถคันนี้
               </Link>
@@ -117,7 +320,7 @@ export default function CarInfo() {
 
       <Footer />
 
-      {/* Lightbox / Fullscreen */}
+      {/* Lightbox */}
       {open && (
         <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center cursor-zoom-out"
@@ -135,8 +338,8 @@ export default function CarInfo() {
 
           <div className="relative w-[92vw] h-[82vh]">
             <Image
-              src={car.image}
-              alt={car.name}
+              src={imageUrl}
+              alt={name}
               fill
               className="object-contain select-none"
               sizes="100vw"
