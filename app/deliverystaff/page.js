@@ -14,14 +14,7 @@ function cls(...a) {
   return a.filter(Boolean).join(" ");
 }
 
-/** ──────────────────────────────────────────────────────────────
- * CameraBox (เวอร์ชันเสถียรเหมือนหน้า Signup)
- * - แก้บั๊กเปิดครั้งแรกได้ ครั้งต่อไปจอดำ ด้วยการ stop() stream เดิมทุกครั้ง
- * - เลือก/สลับกล้องได้ (enumerateDevices)
- * - รองรับ iOS (playsInline, muted, await play())
- * - ปิดสตรีมเมื่อ unmount / แท็บไม่โฟกัส / ปิดไลท์บ็อกซ์
- * - ส่ง {blob, url, dataUrl} ออกไปให้ parent
- * ─────────────────────────────────────────────────────────────*/
+/* ───────────────── CameraBox ───────────────── */
 function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", disabled }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -31,9 +24,8 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
   const [err, setErr] = useState("");
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState("");
-  const [camKey, setCamKey] = useState(0); // รี-mount <video> กัน state ค้าง
+  const [camKey, setCamKey] = useState(0);
 
-  /** ปิดสตรีมให้เกลี้ยง */
   const stopStream = () => {
     try {
       const v = videoRef.current;
@@ -55,15 +47,11 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
       const cams = all.filter((d) => d.kind === "videoinput");
       setDevices(cams);
       if (!deviceId && cams[0]?.deviceId) setDeviceId(cams[0].deviceId);
-    } catch (e) {
-      // บางเบราว์เซอร์จะโชว์ label หลังอนุญาตเท่านั้น
-    }
+    } catch {}
   };
 
   const openCamera = async (id = deviceId) => {
     setErr("");
-
-    // ต้องเป็น HTTPS หรือ http://localhost
     if (!window.isSecureContext && location.hostname !== "localhost") {
       setErr(
         "กล้องต้องใช้บน HTTPS หรือ http://localhost เท่านั้น\n" +
@@ -76,7 +64,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
       return;
     }
 
-    stopStream(); // ปิดของเดิมก่อนเสมอ
+    stopStream();
 
     try {
       const constraints = {
@@ -86,26 +74,21 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
-
-      // อัปเดตรายชื่อกล้องหลังอนุญาต
       await listDevices();
 
-      // เก็บ deviceId ที่ใช้งานจริง (กันกรณีบางเครื่อง)
       try {
         const track = stream.getVideoTracks()?.[0];
         const settings = track?.getSettings?.();
         if (settings?.deviceId) setDeviceId(settings.deviceId);
       } catch {}
 
-      // รี-mount video ก่อนเซ็ต srcObject
       setCamKey((k) => k + 1);
       setIsOpen(true);
 
-      // ผูกสตรีมหลัง DOM โผล่
       setTimeout(async () => {
         const video = videoRef.current;
         if (!video) return;
-        video.muted = true; // iOS autoplay ต้อง mute
+        video.muted = true;
         video.playsInline = true;
         video.srcObject = stream;
         try {
@@ -157,8 +140,6 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
         const url = URL.createObjectURL(blob);
         const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
         onCapture?.({ blob, url, dataUrl });
-
-        // ✅ ปิดกล้องออโต้หลังถ่ายเสร็จ
         closeCamera();
       },
       "image/jpeg",
@@ -166,7 +147,6 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
     );
   };
 
-  // ปิดกล้องเมื่อเปลี่ยนแท็บ/หน้า
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState !== "visible") {
@@ -175,17 +155,10 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
       }
     };
     document.addEventListener("visibilitychange", onVis);
-    return () => {
-      document.removeEventListener("visibilitychange", onVis);
-    };
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
-  // cleanup on unmount
-  useEffect(() => {
-    return () => stopStream();
-  }, []);
-
-  // preload device list (ไม่บังคับสิทธิ์)
+  useEffect(() => () => stopStream(), []);
   useEffect(() => {
     listDevices();
   }, []);
@@ -211,7 +184,6 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
         </div>
       </div>
 
-      {/* เลือกอุปกรณ์กล้อง */}
       <div className="flex items-center gap-2">
         <select
           className={cls(inputCls, "max-w-full")}
@@ -245,7 +217,6 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
         </button>
       </div>
 
-      {/* อัปโหลดไฟล์สำรอง */}
       <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 cursor-pointer text-slate-900 text-sm">
         <input
           type="file"
@@ -265,7 +236,6 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
 
       {err && <p className="text-xs whitespace-pre-line text-red-600">{err}</p>}
 
-      {/* ไลท์บ็อกซ์กล้อง */}
       {isOpen && (
         <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
@@ -284,7 +254,8 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
             <div className="p-3 bg-black/60 flex items-center justify-between">
               <button
                 onClick={() => {
-                  closeCamera();
+                  stopStream();
+                  setIsOpen(false);
                 }}
                 className="px-3 py-2 rounded-lg text-white/90 hover:text-white"
               >
@@ -312,7 +283,6 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
               </div>
             </div>
           </div>
-          {/* แคนวาสใช้งานภายใน */}
           <canvas ref={canvasRef} className="hidden" />
         </div>
       )}
@@ -320,8 +290,8 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
   );
 }
 
-export default function DeliveryStaffPage() {
-  // ฟอร์มหลัก
+/* ───────────── Admin ส่วนที่มี hooks เยอะ แยกออกมา ───────────── */
+function AdminDeliveryContent() {
   const [form, setForm] = useState({
     bookingCode: "",
     carPlate: "",
@@ -334,15 +304,13 @@ export default function DeliveryStaffPage() {
     returnLocation: "",
     returnTime: "",
     notes: "",
-    verifyType: "citizen_id", // citizen_id | driver_license | passport
+    verifyType: "citizen_id",
     depositReceived: false,
-    fuelLevel: "full", // full, 3/4, 1/2, 1/4, empty
+    fuelLevel: "full",
     odometer: "",
   });
-
-  // ภาพถ่าย
-  const [idProofs, setIdProofs] = useState([]); // [{url, blob, dataUrl}]
-  const [carProofs, setCarProofs] = useState([]); // [{url, blob, dataUrl}]
+  const [idProofs, setIdProofs] = useState([]);
+  const [carProofs, setCarProofs] = useState([]);
 
   const addProof = (setFn) => (img) =>
     setFn((prev) => [
@@ -350,7 +318,6 @@ export default function DeliveryStaffPage() {
       { url: img.url, blob: img.blob, dataUrl: img.dataUrl },
     ]);
 
-  // ลบแล้ว revokeObjectURL กัน memory leak
   const removeProof = (setFn) => (idx) =>
     setFn((prev) => {
       const cp = [...prev];
@@ -380,7 +347,6 @@ export default function DeliveryStaffPage() {
       if (!ok) return;
     }
 
-    // สร้าง FormData พร้อมยิง backend (ตัวอย่าง)
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ""));
     idProofs.forEach((p, i) =>
@@ -390,9 +356,6 @@ export default function DeliveryStaffPage() {
       fd.append("car_proof_" + (i + 1), p.blob, `car_proof_${i + 1}.jpg`)
     );
 
-    // TODO: ส่งไปยัง API จริงของคุณ
-    // await fetch("/api/delivery/save", { method: "POST", body: fd });
-
     console.log("DELIVERY_SUBMIT_FORMDATA", {
       ...form,
       idProofsCount: idProofs.length,
@@ -401,11 +364,6 @@ export default function DeliveryStaffPage() {
     alert("บันทึกสำเร็จ (demo) — พร้อมส่งรูปเป็นไฟล์ไป backend");
   };
 
-  const totalPhotos = idProofs.length + carProofs.length;
-
-  /* ───────────── Helper & Queue “วันนี้” ───────────── */
-
-  // เทียบวันเดียวกัน (local)
   const sameDate = (a, b) =>
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
@@ -420,14 +378,12 @@ export default function DeliveryStaffPage() {
     });
   };
 
-  // สร้างเวลา "วันนี้" (local) แล้วแปลงเป็น ISO
   const todayAt = (h, m = 0) => {
     const d = new Date();
     d.setHours(h, m, 0, 0);
     return d.toISOString();
   };
 
-  // Mock คิววันนี้ (สั้นๆ 3 งาน)
   const initialQueue = useMemo(
     () => [
       {
@@ -440,7 +396,7 @@ export default function DeliveryStaffPage() {
         pickupTime: todayAt(9, 30),
         returnLocation: "สาขาสีลม",
         returnTime: todayAt(11, 30),
-        status: "pending", // pending | in_progress | done
+        status: "pending",
       },
       {
         bookingCode: "VR-2025-202",
@@ -472,12 +428,6 @@ export default function DeliveryStaffPage() {
 
   const [queue] = useState(initialQueue);
 
-  const todayQueue = useMemo(
-    () => queue.filter((j) => sameDate(new Date(j.pickupTime), new Date())),
-    [queue]
-  );
-
-  // เติมข้อมูลรายการคิวลงฟอร์มหลัก
   const loadToForm = (j) => {
     setForm((f) => ({
       ...f,
@@ -494,7 +444,6 @@ export default function DeliveryStaffPage() {
       returnTime: j.returnTime
         ? new Date(j.returnTime).toISOString().slice(0, 16)
         : "",
-      // ไม่ยุ่ง field อื่นๆ
     }));
     try {
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -502,475 +451,612 @@ export default function DeliveryStaffPage() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-white text-slate-900">
-      <Headers />
+    <div className="max-w-6xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-8">
+      {/* ซ้าย: ฟอร์ม */}
+      <section className={`${cardCls} p-6 md:p-8`}>
+        <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+          Delivery Staff{" "}
+          <span className="text-xs ml-2 align-middle rounded bg-green-100 text-green-700 px-2 py-0.5">
+            Admin
+          </span>
+        </h1>
+        <p className="text-slate-700 mt-1">
+          บันทึกข้อมูลการส่งมอบรถให้ลูกค้า พร้อมถ่ายหลักฐาน/เอกสารยืนยันตัวตน
+        </p>
 
-      <main className="flex-grow">
-        <div className="max-w-6xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-8">
-          {/* ซ้าย: ฟอร์ม */}
-          <section className={`${cardCls} p-6 md:p-8`}>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-              Delivery Staff
-            </h1>
-            <p className="text-slate-700 mt-1">
-              บันทึกข้อมูลการส่งมอบรถให้ลูกค้า
-              พร้อมถ่ายหลักฐาน/เอกสารยืนยันตัวตน
-            </p>
+        <form className="mt-6 grid gap-6" onSubmit={handleSubmit}>
+          {/* ข้อมูลการจอง / รถ */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <label className={labelCls}>รหัสการจอง *</label>
+              <input
+                name="bookingCode"
+                className={inputCls}
+                placeholder="เช่น VR-2025-000123"
+                value={form.bookingCode}
+                onChange={handleChange}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className={labelCls}>ทะเบียนรถ</label>
+              <input
+                name="carPlate"
+                className={inputCls}
+                placeholder="1กก-1234"
+                value={form.carPlate}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className={labelCls}>รุ่นรถ</label>
+              <input
+                name="carName"
+                className={inputCls}
+                placeholder="Toyota Corolla Cross"
+                value={form.carName}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
 
-            <form className="mt-6 grid gap-6" onSubmit={handleSubmit}>
-              {/* ข้อมูลการจอง / รถ */}
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <label className={labelCls}>รหัสการจอง *</label>
-                  <input
-                    name="bookingCode"
-                    className={inputCls}
-                    placeholder="เช่น VR-2025-000123"
-                    value={form.bookingCode}
-                    onChange={handleChange}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className={labelCls}>ทะเบียนรถ</label>
-                  <input
-                    name="carPlate"
-                    className={inputCls}
-                    placeholder="1กก-1234"
-                    value={form.carPlate}
-                    onChange={handleChange}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className={labelCls}>รุ่นรถ</label>
-                  <input
-                    name="carName"
-                    className={inputCls}
-                    placeholder="Toyota Corolla Cross"
-                    value={form.carName}
-                    onChange={handleChange}
-                  />
-                </div>
-              </div>
+          {/* ลูกค้า */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <label className={labelCls}>ชื่อลูกค้า *</label>
+              <input
+                name="customerName"
+                className={inputCls}
+                placeholder="ชื่อ–นามสกุล"
+                value={form.customerName}
+                onChange={handleChange}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className={labelCls}>เบอร์ติดต่อ *</label>
+              <input
+                name="customerPhone"
+                className={inputCls}
+                placeholder="080-000-0000"
+                value={form.customerPhone}
+                onChange={handleChange}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className={labelCls}>เลขประจำตัว/เอกสาร</label>
+              <input
+                name="customerId"
+                className={inputCls}
+                placeholder="เลขบัตร/ใบขับขี่/Passport"
+                value={form.customerId}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
 
-              {/* ลูกค้า */}
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <label className={labelCls}>ชื่อลูกค้า *</label>
-                  <input
-                    name="customerName"
-                    className={inputCls}
-                    placeholder="ชื่อ–นามสกุล"
-                    value={form.customerName}
-                    onChange={handleChange}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className={labelCls}>เบอร์ติดต่อ *</label>
-                  <input
-                    name="customerPhone"
-                    className={inputCls}
-                    placeholder="080-000-0000"
-                    value={form.customerPhone}
-                    onChange={handleChange}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className={labelCls}>เลขประจำตัว/เอกสาร</label>
-                  <input
-                    name="customerId"
-                    className={inputCls}
-                    placeholder="เลขบัตร/ใบขับขี่/Passport"
-                    value={form.customerId}
-                    onChange={handleChange}
-                  />
-                </div>
-              </div>
+          {/* สถานที่/เวลา */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className={labelCls}>สถานที่ส่งมอบ</label>
+              <input
+                name="pickupLocation"
+                className={inputCls}
+                placeholder="เช่น สนามบินเชียงใหม่ (CNX)"
+                value={form.pickupLocation}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className={labelCls}>วัน–เวลาส่งมอบ</label>
+              <input
+                type="datetime-local"
+                name="pickupTime"
+                className={inputCls}
+                value={form.pickupTime}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
 
-              {/* สถานที่/เวลา */}
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className={labelCls}>สถานที่ส่งมอบ</label>
-                  <input
-                    name="pickupLocation"
-                    className={inputCls}
-                    placeholder="เช่น สนามบินเชียงใหม่ (CNX)"
-                    value={form.pickupLocation}
-                    onChange={handleChange}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className={labelCls}>วัน–เวลาส่งมอบ</label>
-                  <input
-                    type="datetime-local"
-                    name="pickupTime"
-                    className={inputCls}
-                    value={form.pickupTime}
-                    onChange={handleChange}
-                  />
-                </div>
-              </div>
+          {/* คืนรถ */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className={labelCls}>สถานที่นัดคืนรถ</label>
+              <input
+                name="returnLocation"
+                className={inputCls}
+                placeholder="เช่น สาขาสยามพารากอน"
+                value={form.returnLocation}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className={labelCls}>วัน–เวลาคืนรถ</label>
+              <input
+                type="datetime-local"
+                name="returnTime"
+                className={inputCls}
+                value={form.returnTime}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
 
-              {/* คืนรถ */}
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className={labelCls}>สถานที่นัดคืนรถ</label>
-                  <input
-                    name="returnLocation"
-                    className={inputCls}
-                    placeholder="เช่น สาขาสยามพารากอน"
-                    value={form.returnLocation}
-                    onChange={handleChange}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className={labelCls}>วัน–เวลาคืนรถ</label>
-                  <input
-                    type="datetime-local"
-                    name="returnTime"
-                    className={inputCls}
-                    value={form.returnTime}
-                    onChange={handleChange}
-                  />
-                </div>
-              </div>
-
-              {/* สถานะ/ตัวเลข */}
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <label className={labelCls}>ระดับน้ำมัน</label>
-                  <select
-                    name="fuelLevel"
-                    className={inputCls}
-                    value={form.fuelLevel}
-                    onChange={handleChange}
-                  >
-                    <option value="full">เต็มถัง</option>
-                    <option value="3/4">3/4</option>
-                    <option value="1/2">1/2</option>
-                    <option value="1/4">1/4</option>
-                    <option value="empty">เกือบหมด</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className={labelCls}>เลขไมล์ (กม.)</label>
-                  <input
-                    name="odometer"
-                    className={inputCls}
-                    placeholder="เช่น 35,420"
-                    value={form.odometer}
-                    onChange={handleChange}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className={labelCls}>เงินมัดจำ</label>
-                  <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">
-                    <input
-                      type="checkbox"
-                      name="depositReceived"
-                      checked={form.depositReceived}
-                      onChange={handleChange}
-                      className="h-4 w-4 accent-black"
-                    />
-                    ได้รับเรียบร้อย
-                  </label>
-                </div>
-              </div>
-
-              {/* ประเภทเอกสารที่ตรวจ */}
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <label className={labelCls}>เอกสารที่ใช้ยืนยัน</label>
-                  <select
-                    name="verifyType"
-                    className={inputCls}
-                    value={form.verifyType}
-                    onChange={handleChange}
-                  >
-                    <option value="citizen_id">บัตรประชาชน</option>
-                    <option value="driver_license">ใบขับขี่</option>
-                    <option value="passport">Passport</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* กล้อง/อัปโหลด: เอกสารยืนยัน */}
-              <div className="space-y-3">
-                <CameraBox
-                  title="ถ่ายรูปเอกสารยืนยันตัวตน (บัตร/ใบขับขี่/Passport)"
-                  onCapture={addProof(setIdProofs)}
-                  buttonLabel="ถ่ายหลักฐาน"
-                />
-                {idProofs.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {idProofs.map((p, idx) => (
-                      <div
-                        key={idx}
-                        className="relative rounded-lg overflow-hidden border border-slate-300"
-                      >
-                        <img
-                          src={p.dataUrl || p.url}
-                          alt={`ID Proof ${idx + 1}`}
-                          className="w-full h-32 object-cover"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeProof(setIdProofs)(idx)}
-                          className="absolute top-1 right-1 px-2 py-0.5 text-xs rounded bg-black/70 text-white"
-                        >
-                          ลบ
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* กล้อง/อัปโหลด: สภาพรถ */}
-              <div className="space-y-3">
-                <CameraBox
-                  title="ถ่ายรูปสภาพรถตอนส่งมอบ (รอย/ล้อ/มุมต่าง ๆ)"
-                  onCapture={addProof(setCarProofs)}
-                  buttonLabel="ถ่ายรูปสภาพรถ"
-                />
-                {carProofs.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {carProofs.map((p, idx) => (
-                      <div
-                        key={idx}
-                        className="relative rounded-lg overflow-hidden border border-slate-300"
-                      >
-                        <img
-                          src={p.dataUrl || p.url}
-                          alt={`Car Proof ${idx + 1}`}
-                          className="w-full h-32 object-cover"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeProof(setCarProofs)(idx)}
-                          className="absolute top-1 right-1 px-2 py-0.5 text-xs rounded bg-black/70 text-white"
-                        >
-                          ลบ
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* หมายเหตุ */}
-              <div className="space-y-2">
-                <label className={labelCls}>หมายเหตุเพิ่มเติม</label>
-                <textarea
-                  name="notes"
-                  className={inputCls}
-                  rows={4}
-                  placeholder="เช่น มีรอยขีดข่วนบริเวณกันชนหน้า..."
-                  value={form.notes}
+          {/* สถานะ/ตัวเลข */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <label className={labelCls}>ระดับน้ำมัน</label>
+              <select
+                name="fuelLevel"
+                className={inputCls}
+                value={form.fuelLevel}
+                onChange={handleChange}
+              >
+                <option value="full">เต็มถัง</option>
+                <option value="3/4">3/4</option>
+                <option value="1/2">1/2</option>
+                <option value="1/4">1/4</option>
+                <option value="empty">เกือบหมด</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className={labelCls}>เลขไมล์ (กม.)</label>
+              <input
+                name="odometer"
+                className={inputCls}
+                placeholder="เช่น 35,420"
+                value={form.odometer}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className={labelCls}>เงินมัดจำ</label>
+              <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  name="depositReceived"
+                  checked={form.depositReceived}
                   onChange={handleChange}
+                  className="h-4 w-4 accent-black"
                 />
-              </div>
+                ได้รับเรียบร้อย
+              </label>
+            </div>
+          </div>
 
-              {/* ปุ่ม */}
-              <div className="flex flex-col sm:flex-row gap-3">
+          {/* ประเภทเอกสารที่ตรวจ */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <label className={labelCls}>เอกสารที่ใช้ยืนยัน</label>
+              <select
+                name="verifyType"
+                className={inputCls}
+                value={form.verifyType}
+                onChange={handleChange}
+              >
+                <option value="citizen_id">บัตรประชาชน</option>
+                <option value="driver_license">ใบขับขี่</option>
+                <option value="passport">Passport</option>
+              </select>
+            </div>
+          </div>
+
+          {/* กล้อง/อัปโหลด: เอกสารยืนยัน */}
+          <div className="space-y-3">
+            <CameraBox
+              title="ถ่ายรูปเอกสารยืนยันตัวตน (บัตร/ใบขับขี่/Passport)"
+              onCapture={addProof(setIdProofs)}
+              buttonLabel="ถ่ายหลักฐาน"
+            />
+            {idProofs.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {idProofs.map((p, idx) => (
+                  <div
+                    key={idx}
+                    className="relative rounded-lg overflow-hidden border border-slate-300"
+                  >
+                    <img
+                      src={p.dataUrl || p.url}
+                      alt={`ID Proof ${idx + 1}`}
+                      className="w-full h-32 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeProof(setIdProofs)(idx)}
+                      className="absolute top-1 right-1 px-2 py-0.5 text-xs rounded bg-black/70 text-white"
+                    >
+                      ลบ
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* กล้อง/อัปโหลด: สภาพรถ */}
+          <div className="space-y-3">
+            <CameraBox
+              title="ถ่ายรูปสภาพรถตอนส่งมอบ (รอย/ล้อ/มุมต่าง ๆ)"
+              onCapture={addProof(setCarProofs)}
+              buttonLabel="ถ่ายรูปสภาพรถ"
+            />
+            {carProofs.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {carProofs.map((p, idx) => (
+                  <div
+                    key={idx}
+                    className="relative rounded-lg overflow-hidden border border-slate-300"
+                  >
+                    <img
+                      src={p.dataUrl || p.url}
+                      alt={`Car Proof ${idx + 1}`}
+                      className="w-full h-32 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeProof(setCarProofs)(idx)}
+                      className="absolute top-1 right-1 px-2 py-0.5 text-xs rounded bg-black/70 text-white"
+                    >
+                      ลบ
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* หมายเหตุ */}
+          <div className="space-y-2">
+            <label className={labelCls}>หมายเหตุเพิ่มเติม</label>
+            <textarea
+              name="notes"
+              className={inputCls}
+              rows={4}
+              placeholder="เช่น มีรอยขีดข่วนบริเวณกันชนหน้า..."
+              value={form.notes}
+              onChange={handleChange}
+            />
+          </div>
+
+          {/* ปุ่ม */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setForm({
+                  bookingCode: "",
+                  carPlate: "",
+                  carName: "",
+                  customerName: "",
+                  customerPhone: "",
+                  customerId: "",
+                  pickupLocation: "",
+                  pickupTime: "",
+                  returnLocation: "",
+                  returnTime: "",
+                  notes: "",
+                  verifyType: "citizen_id",
+                  depositReceived: false,
+                  fuelLevel: "full",
+                  odometer: "",
+                });
+                setIdProofs((prev) => {
+                  prev.forEach((p) => {
+                    try {
+                      if (p?.url?.startsWith("blob:"))
+                        URL.revokeObjectURL(p.url);
+                    } catch {}
+                  });
+                  return [];
+                });
+                setCarProofs((prev) => {
+                  prev.forEach((p) => {
+                    try {
+                      if (p?.url?.startsWith("blob:"))
+                        URL.revokeObjectURL(p.url);
+                    } catch {}
+                  });
+                  return [];
+                });
+              }}
+              className="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+            >
+              ล้างฟอร์ม
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2.5 rounded-lg bg-black text-white font-semibold hover:bg-slate-900"
+            >
+              บันทึกข้อมูลส่งมอบ
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* ขวา: สรุปโดยย่อ */}
+      <aside className={`${cardCls} p-6 md:p-8 h-fit`}>
+        <h3 className="text-lg font-bold">สรุปโดยย่อ</h3>
+        <div className="mt-4 text-sm space-y-2">
+          <div className="flex justify-between">
+            <span>รหัสการจอง</span>
+            <span className="font-medium">{form.bookingCode || "-"}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>ลูกค้า</span>
+            <span className="font-medium">{form.customerName || "-"}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>โทร</span>
+            <span>{form.customerPhone || "-"}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>ส่งมอบ</span>
+            <span className="text-right">
+              {form.pickupLocation || "-"}
+              <br className="hidden sm:block" />
+              <span className="text-slate-700">{form.pickupTime || "-"}</span>
+            </span>
+          </div>
+          <hr className="my-3 border-slate-200" />
+          <div className="flex justify-between">
+            <span>ประเภทเอกสาร</span>
+            <span>
+              {
+                {
+                  citizen_id: "บัตรประชาชน",
+                  driver_license: "ใบขับขี่",
+                  passport: "Passport",
+                }[form.verifyType]
+              }
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span>รูปที่แนบ</span>
+            <span>{idProofs.length + carProofs.length} รูป</span>
+          </div>
+          <div className="flex justify-between">
+            <span>น้ำมัน</span>
+            <span>{form.fuelLevel}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>เลขไมล์</span>
+            <span>{form.odometer || "-"}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>เงินมัดจำ</span>
+            <span>{form.depositReceived ? "รับแล้ว" : "ยังไม่รับ"}</span>
+          </div>
+        </div>
+      </aside>
+
+      {/* ขวา: คิววันนี้ */}
+      <aside className={`${cardCls} p-6 md:p-8 h-fit`}>
+        <h3 className="text-lg font-bold">คิววันนี้ (Today)</h3>
+        <p className="text-slate-600 text-sm mt-1">
+          แสดงเฉพาะงานรับรถที่นัดหมาย “วันนี้”
+        </p>
+        <TodayQueue queue={queue} onPick={loadToForm} />
+      </aside>
+    </div>
+  );
+}
+
+/* แยก TodayQueue เป็น component ของตัวเอง (มี useMemo ของตัวเอง) */
+function TodayQueue({ queue, onPick }) {
+  const sameDate = (a, b) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const fmtTime = (iso) => {
+    if (!iso) return "-";
+    const d = new Date(iso);
+    return d.toLocaleTimeString("th-TH", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const todayQueue = useMemo(
+    () => queue.filter((j) => sameDate(new Date(j.pickupTime), new Date())),
+    [queue]
+  );
+
+  return (
+    <div className="mt-4 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-slate-600">
+            <th className="py-2 pr-3 text-left">เวลา</th>
+            <th className="py-2 pr-3 text-left">รหัส</th>
+            <th className="py-2 pr-3 text-left">รถ / ป้าย</th>
+            <th className="py-2 pr-3 text-left">ลูกค้า</th>
+            <th className="py-2 pr-3 text-left">สถานะ</th>
+            <th className="py-2 pr-0 text-left">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-200">
+          {todayQueue.map((j) => (
+            <tr key={j.bookingCode}>
+              <td className="py-2 pr-3">{fmtTime(j.pickupTime)}</td>
+              <td className="py-2 pr-3 font-medium">{j.bookingCode}</td>
+              <td className="py-2 pr-3">
+                {j.carName}
+                <div className="text-xs text-slate-600">{j.carPlate}</div>
+              </td>
+              <td className="py-2 pr-3">
+                {j.customerName}
+                <div className="text-xs text-slate-600">{j.customerPhone}</div>
+              </td>
+              <td className="py-2 pr-3">
+                <span
+                  className={cls(
+                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                    j.status === "pending" && "bg-amber-100 text-amber-800",
+                    j.status === "in_progress" && "bg-blue-100 text-blue-800",
+                    j.status === "done" && "bg-emerald-100 text-emerald-800"
+                  )}
+                >
+                  {j.status === "pending"
+                    ? "รอส่งมอบ"
+                    : j.status === "in_progress"
+                    ? "กำลังดำเนินการ"
+                    : "เสร็จแล้ว"}
+                </span>
+              </td>
+              <td className="py-2 pr-0">
                 <button
                   type="button"
-                  onClick={() => {
-                    setForm({
-                      bookingCode: "",
-                      carPlate: "",
-                      carName: "",
-                      customerName: "",
-                      customerPhone: "",
-                      customerId: "",
-                      pickupLocation: "",
-                      pickupTime: "",
-                      returnLocation: "",
-                      returnTime: "",
-                      notes: "",
-                      verifyType: "citizen_id",
-                      depositReceived: false,
-                      fuelLevel: "full",
-                      odometer: "",
-                    });
-                    // revoke URL ทั้งหมด
-                    setIdProofs((prev) => {
-                      prev.forEach((p) => {
-                        try {
-                          if (p?.url?.startsWith("blob:"))
-                            URL.revokeObjectURL(p.url);
-                        } catch {}
-                      });
-                      return [];
-                    });
-                    setCarProofs((prev) => {
-                      prev.forEach((p) => {
-                        try {
-                          if (p?.url?.startsWith("blob:"))
-                            URL.revokeObjectURL(p.url);
-                        } catch {}
-                      });
-                      return [];
-                    });
-                  }}
-                  className="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+                  onClick={() => onPick(j)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"
+                  title="เปิดฟอร์มด้วยข้อมูลนี้"
                 >
-                  ล้างฟอร์ม
+                  เปิดฟอร์ม
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-lg bg-black text-white font-semibold hover:bg-slate-900"
+              </td>
+            </tr>
+          ))}
+          {todayQueue.length === 0 && (
+            <tr>
+              <td colSpan={6} className="py-4 text-center text-slate-500">
+                วันนี้ยังไม่มีคิวรับรถ
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ───────────── Gate Component (คงลำดับ hooks เสมอ) ───────────── */
+export default function DeliveryStaffPage() {
+  const [auth, setAuth] = useState({
+    loading: true,
+    isAdmin: false,
+    name: "",
+    email: "",
+  });
+
+  useEffect(() => {
+    let ignore = false;
+
+    // preload จาก localStorage
+    try {
+      const isAdminLocal =
+        (localStorage.getItem("vrent_is_admin") || "false").toLowerCase() ===
+        "true";
+      const fullNameLS =
+        localStorage.getItem("vrent_full_name") ||
+        localStorage.getItem("vrent_user_name") ||
+        "";
+      const emailLS =
+        localStorage.getItem("vrent_login_email") ||
+        localStorage.getItem("vrent_user_id") ||
+        "";
+      setAuth((p) =>
+        p.loading
+          ? {
+              loading: true,
+              isAdmin: isAdminLocal,
+              name: fullNameLS,
+              email: emailLS,
+            }
+          : p
+      );
+    } catch {}
+
+    // ยืนยันกับ backend
+    (async () => {
+      try {
+        const userIdLS = (localStorage.getItem("vrent_user_id") || "").trim();
+        const emailLS =
+          (localStorage.getItem("vrent_login_email") || "").trim() ||
+          (localStorage.getItem("vrent_user_id") || "").trim();
+
+        const qp = new URLSearchParams();
+        if (userIdLS) qp.set("user_id", userIdLS);
+        if (emailLS) qp.set("email", emailLS);
+
+        const headers = {};
+        if (userIdLS) headers["x-user-id"] = userIdLS;
+        if (emailLS) headers["x-email"] = emailLS;
+
+        const r = await fetch(`/api/erp/me?${qp.toString()}`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+          headers,
+        });
+        const j = await r.json().catch(() => null);
+        if (ignore) return;
+
+        const u = j?.user || {};
+        setAuth({
+          loading: false,
+          isAdmin: !!u.isAdmin,
+          name: u.fullName || "",
+          email: u.email || "",
+        });
+
+        try {
+          if (u.fullName) localStorage.setItem("vrent_full_name", u.fullName);
+          if (u.email) localStorage.setItem("vrent_login_email", u.email);
+          localStorage.setItem("vrent_is_admin", String(!!u.isAdmin));
+        } catch {}
+      } catch {
+        if (!ignore) setAuth((p) => ({ ...p, loading: false }));
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  return (
+    <div className="flex flex-col min-h-screen bg-white text-slate-900">
+      <Headers />
+      <main className="flex-grow">
+        {auth.loading ? (
+          <div className="max-w-3xl mx-auto p-8">
+            <div className={`${cardCls} p-8 text-center`}>
+              <p className="text-lg font-semibold">กำลังตรวจสอบสิทธิ์...</p>
+              <p className="text-slate-600 mt-1 text-sm">
+                กรุณารอสักครู่ ระบบกำลังตรวจสอบสิทธิ์ผู้ใช้งาน
+              </p>
+            </div>
+          </div>
+        ) : !auth.isAdmin ? (
+          <div className="max-w-3xl mx-auto p-8">
+            <div className={`${cardCls} p-8 text-center`}>
+              <h1 className="text-2xl font-extrabold tracking-tight">
+                ไม่สามารถเข้าถึงได้
+              </h1>
+              <p className="text-slate-700 mt-2">
+                หน้านี้สำหรับผู้ดูแลระบบเท่านั้น
+              </p>
+              <div className="mt-5">
+                <a
+                  href="/"
+                  className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 inline-block"
                 >
-                  บันทึกข้อมูลส่งมอบ
-                </button>
+                  กลับหน้าแรก
+                </a>
               </div>
-            </form>
-          </section>
-
-          {/* ขวา: สรุป/เช็คลิสต์เร็ว */}
-          <aside className={`${cardCls} p-6 md:p-8 h-fit`}>
-            <h3 className="text-lg font-bold">สรุปโดยย่อ</h3>
-            <div className="mt-4 text-sm space-y-2">
-              <div className="flex justify-between">
-                <span>รหัสการจอง</span>
-                <span className="font-medium">{form.bookingCode || "-"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>ลูกค้า</span>
-                <span className="font-medium">{form.customerName || "-"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>โทร</span>
-                <span>{form.customerPhone || "-"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>ส่งมอบ</span>
-                <span className="text-right">
-                  {form.pickupLocation || "-"}
-                  <br className="hidden sm:block" />
-                  <span className="text-slate-700">
-                    {form.pickupTime || "-"}
-                  </span>
-                </span>
-              </div>
-              <hr className="my-3 border-slate-200" />
-              <div className="flex justify-between">
-                <span>ประเภทเอกสาร</span>
-                <span>
-                  {
-                    {
-                      citizen_id: "บัตรประชาชน",
-                      driver_license: "ใบขับขี่",
-                      passport: "Passport",
-                    }[form.verifyType]
-                  }
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>รูปที่แนบ</span>
-                <span>{totalPhotos} รูป</span>
-              </div>
-              <div className="flex justify-between">
-                <span>น้ำมัน</span>
-                <span>{form.fuelLevel}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>เลขไมล์</span>
-                <span>{form.odometer || "-"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>เงินมัดจำ</span>
-                <span>{form.depositReceived ? "รับแล้ว" : "ยังไม่รับ"}</span>
-              </div>
+              {(auth.email || auth.name) && (
+                <p className="text-xs text-slate-500 mt-3">
+                  ผู้ใช้ปัจจุบัน: {auth.name || "-"} ({auth.email || "-"})
+                </p>
+              )}
             </div>
-          </aside>
-
-          {/* ขวา: คิววันนี้ (ตารางย่อ) */}
-          <aside className={`${cardCls} p-6 md:p-8 h-fit`}>
-            <h3 className="text-lg font-bold">คิววันนี้ (Today)</h3>
-            <p className="text-slate-600 text-sm mt-1">
-              แสดงเฉพาะงานรับรถที่นัดหมาย “วันนี้”
-            </p>
-
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-slate-600">
-                    <th className="py-2 pr-3 text-left">เวลา</th>
-                    <th className="py-2 pr-3 text-left">รหัส</th>
-                    <th className="py-2 pr-3 text-left">รถ / ป้าย</th>
-                    <th className="py-2 pr-3 text-left">ลูกค้า</th>
-                    <th className="py-2 pr-3 text-left">สถานะ</th>
-                    <th className="py-2 pr-0 text-left">จัดการ</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {todayQueue.map((j) => (
-                    <tr key={j.bookingCode}>
-                      <td className="py-2 pr-3">{fmtTime(j.pickupTime)}</td>
-                      <td className="py-2 pr-3 font-medium">{j.bookingCode}</td>
-                      <td className="py-2 pr-3">
-                        {j.carName}
-                        <div className="text-xs text-slate-600">
-                          {j.carPlate}
-                        </div>
-                      </td>
-                      <td className="py-2 pr-3">
-                        {j.customerName}
-                        <div className="text-xs text-slate-600">
-                          {j.customerPhone}
-                        </div>
-                      </td>
-                      <td className="py-2 pr-3">
-                        <span
-                          className={cls(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                            j.status === "pending" &&
-                              "bg-amber-100 text-amber-800",
-                            j.status === "in_progress" &&
-                              "bg-blue-100 text-blue-800",
-                            j.status === "done" &&
-                              "bg-emerald-100 text-emerald-800"
-                          )}
-                        >
-                          {j.status === "pending"
-                            ? "รอส่งมอบ"
-                            : j.status === "in_progress"
-                            ? "กำลังดำเนินการ"
-                            : "เสร็จแล้ว"}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-0">
-                        <button
-                          type="button"
-                          onClick={() => loadToForm(j)}
-                          className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"
-                          title="เปิดฟอร์มด้วยข้อมูลนี้"
-                        >
-                          เปิดฟอร์ม
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {todayQueue.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="py-4 text-center text-slate-500"
-                      >
-                        วันนี้ยังไม่มีคิวรับรถ
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </aside>
-        </div>
+          </div>
+        ) : (
+          <AdminDeliveryContent />
+        )}
       </main>
-
       <Footer />
     </div>
   );

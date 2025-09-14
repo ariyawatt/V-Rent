@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/Footer";
@@ -12,15 +12,24 @@ const getBool = (v) => String(v ?? "").toLowerCase() === "true";
 const fmt = (n) => Number(n || 0).toLocaleString();
 const pick = (sp, k, fb = "") => sp.get(k) ?? fb;
 
-// เลือกวันที่แบบปลอดภัย: ให้ความสำคัญกับ ISO ก่อน (pickup_at/return_at)
-// ตกมาใช้ pickupAt/dropoffAt (local input) ถ้าไม่มี
+// แปลงวันที่เป็นรูปแบบที่ ERP ต้องการ: "YYYY-MM-DD HH:mm:ss"
+function toErpDateTime(s) {
+  if (!s) return "";
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}:00`;
+}
+
+// เลือกวันที่แบบปลอดภัย: ให้ความสำคัญ ISO ก่อน ตกมาใช้ local input
 function chooseDateStrings(sp) {
   const isoPick = pick(sp, "pickup_at", "");
   const isoDrop = pick(sp, "return_at", "");
   const localPick = pick(sp, "pickupAt", "");
   const localDrop = pick(sp, "dropoffAt", "");
 
-  // แสดงใน UI: โชว์ local ถ้ามี, ไม่งั้น format จาก ISO → local
   const toLocal = (iso) => {
     if (!iso) return "";
     const d = new Date(iso);
@@ -32,10 +41,8 @@ function chooseDateStrings(sp) {
   };
 
   return {
-    // ใช้สำหรับแสดง
     displayPick: localPick || toLocal(isoPick),
     displayDrop: localDrop || toLocal(isoDrop),
-    // ใช้สำหรับคำนวณ
     calcPick: isoPick || localPick || "",
     calcDrop: isoDrop || localDrop || "",
   };
@@ -43,6 +50,7 @@ function chooseDateStrings(sp) {
 
 export default function ChoosePayment() {
   const sp = useSearchParams();
+  const router = useRouter();
 
   /* ---------- รับพารามิเตอร์ทั้งหมด ---------- */
   // รถ + บริษัท + ราคา
@@ -76,14 +84,14 @@ export default function ChoosePayment() {
     fullInsurance: getBool(pick(sp, "fullInsurance")),
   };
 
-  // flags อื่นๆจากหน้าแรก
+  // flags อื่นๆ
   const passengers = pick(sp, "passengers");
   const promo = pick(sp, "promo");
   const ftype = pick(sp, "ftype");
   const key = pick(sp, "key");
   const isAdmin = getBool(pick(sp, "isAdmin"));
 
-  // ถ้าข้อมูลรถใน query ไม่ครบ ลอง fallback จาก data/cars
+  // รถ fallback
   const carFallback = useMemo(() => getCarById(String(carId || "")), [carId]);
   const car = useMemo(() => {
     const fromQueryHasCar =
@@ -142,7 +150,7 @@ export default function ChoosePayment() {
     carFallback,
   ]);
 
-  /* ---------- คำนวณราคา/จำนวนวัน ---------- */
+  /* ---------- ราคา/จำนวนวัน ---------- */
   const dayCount = useMemo(() => {
     if (!calcPick || !calcDrop) return 1;
     const A = new Date(calcPick);
@@ -165,6 +173,7 @@ export default function ChoosePayment() {
     exp: "",
     cvc: "",
   });
+  const [submitting, setSubmitting] = useState(false);
 
   // เก็บ query ทั้งชุดไว้ส่งกลับ/ต่อไป
   const tailQS = useMemo(() => {
@@ -172,11 +181,72 @@ export default function ChoosePayment() {
     return qs ? `?${qs}` : "";
   }, [sp]);
 
-  // สร้างอ็อบเจ็กต์สำหรับ Debug panel (ดูว่ามีอะไรส่งมาบ้าง)
+  // กดชำระเงิน -> เรียก API proxy ของเรา
+  async function handlePay() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      // รวมตัวเลือกเสริมเป็นข้อความ
+      const extrasList = [
+        extras.childSeat ? "childSeat" : null,
+        extras.gps ? "gps" : null,
+        extras.fullInsurance ? "fullInsurance" : null,
+      ].filter(Boolean);
+      const additional_options = extrasList.join(", ");
+
+      const payment_status = "Paid";
+      const status = "Confirmed";
+
+      const payload = {
+        confirmation_document: key || `WEB-${Date.now()}`,
+        customer_name: name || (email ? email.split("@")[0] : ""),
+        customer_phone: phone || "",
+        vehicle:
+          car?.name ||
+          [carBrand, carName].filter(Boolean).join(" ") ||
+          "Vehicle",
+        base_price: total, // ถ้าอยากส่งเฉพาะราคารถ: ใช้ base
+        pickup_place: pickupLocation || "",
+        return_place: dropoffLocation || "",
+        pickup_date: toErpDateTime(calcPick || displayPick),
+        return_date: toErpDateTime(calcDrop || displayDrop),
+        discount: 0,
+        down_payment: total, // demo: จ่ายเต็ม
+        contact_platform: "website",
+        payment_status,
+        status,
+        additional_options,
+        remark: note || "",
+      };
+
+      const r = await fetch("/api/erp/rental/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include", // สำคัญ: ให้แนบคุกกี้ ERP ที่ฝั่ง server มีสิทธิ์
+        body: JSON.stringify(payload),
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) {
+        console.error("ERP create_rental failed:", j);
+        alert("ไม่สามารถบันทึกข้อมูลการชำระเงินได้ กรุณาลองใหม่อีกครั้ง");
+        setSubmitting(false);
+        return;
+      }
+
+      alert("ชำระเงินเสร็จสิ้น ขอบคุณค่ะ 🙌");
+      window.location.href = "/"; // หรือ router.push("/")
+    } catch (e) {
+      console.error(e);
+      alert("เกิดข้อผิดพลาดระหว่างบันทึกการชำระเงิน");
+      setSubmitting(false);
+    }
+  }
+
+  // สำหรับ debug ทั้งก้อนถ้าต้องการ
   const debugAllParams = useMemo(() => {
     const o = {};
     for (const [k, v] of sp.entries()) o[k] = v;
-    // เพิ่มที่คำนวณ/สรุปเพื่อสะดวกเวลาเทส
     o.__derived__ = {
       dayCount,
       base,
@@ -383,14 +453,19 @@ export default function ChoosePayment() {
                 </Link>
                 <button
                   type="button"
-                  onClick={() => alert("Demo: ดำเนินการชำระเงิน (mock)")}
-                  className="px-5 py-2.5 rounded-lg bg-slate-900 text-white font-semibold hover:bg-black"
+                  onClick={handlePay}
+                  disabled={submitting}
+                  className={`px-5 py-2.5 rounded-lg text-white font-semibold ${
+                    submitting
+                      ? "bg-slate-400 cursor-not-allowed"
+                      : "bg-slate-900 hover:bg-black"
+                  }`}
                 >
-                  ดำเนินการชำระเงิน
+                  {submitting ? "กำลังบันทึก..." : "ดำเนินการชำระเงิน"}
                 </button>
               </div>
 
-              {/* Debug panel: กดเพื่อดูพารามิเตอร์ทั้งหมด */}
+              {/* Debug panel (เปิดใช้เมื่อต้องการ) */}
               {/* <details className="mt-6 rounded-lg border border-slate-300 p-4 bg-slate-50">
                 <summary className="cursor-pointer font-semibold text-slate-900">
                   Debug: ข้อมูลที่ส่งมาหน้านี้ทั้งหมด
