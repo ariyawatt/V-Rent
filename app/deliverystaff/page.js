@@ -2,17 +2,26 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo } from "react";
-import Headers from "@/Components/Header";
+import Header from "@/Components/Header";
 import Footer from "@/Components/Footer";
+import Link from "next/link";
 
+/* ---------- UI helpers ---------- */
+const cx = (...a) => a.filter(Boolean).join(" ");
 const labelCls = "text-sm font-semibold text-slate-800";
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black";
 const cardCls = "bg-white rounded-2xl shadow-lg border border-slate-200";
 
-function cls(...a) {
-  return a.filter(Boolean).join(" ");
-}
+/* ---------- statuses (เหลือแค่ ส่งมอบ/เสร็จสิ้น) ---------- */
+const STATUS = {
+  pending: { label: "ส่งมอบ", badge: "bg-amber-100 text-amber-800" },
+  done: { label: "เสร็จสิ้น", badge: "bg-emerald-100 text-emerald-800" },
+};
+
+/* ---------- small utils ---------- */
+const toLocalInputDT = (iso) =>
+  iso ? new Date(iso).toISOString().slice(0, 16) : "";
 
 /* ───────────────── CameraBox ───────────────── */
 function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", disabled }) {
@@ -28,23 +37,17 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
 
   const stopStream = () => {
     try {
-      const v = videoRef.current;
-      if (v) {
-        v.pause?.();
-        v.srcObject = null;
-      }
-      const s = streamRef.current;
-      if (s) {
-        s.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
+      videoRef.current && (videoRef.current.srcObject = null);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     } catch {}
   };
 
   const listDevices = async () => {
     try {
-      const all = await navigator.mediaDevices.enumerateDevices();
-      const cams = all.filter((d) => d.kind === "videoinput");
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter(
+        (d) => d.kind === "videoinput"
+      );
       setDevices(cams);
       if (!deviceId && cams[0]?.deviceId) setDeviceId(cams[0].deviceId);
     } catch {}
@@ -52,95 +55,81 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
 
   const openCamera = async (id = deviceId) => {
     setErr("");
-    if (!window.isSecureContext && location.hostname !== "localhost") {
-      setErr(
+    if (!window.isSecureContext && location.hostname !== "localhost")
+      return setErr(
         "กล้องต้องใช้บน HTTPS หรือ http://localhost เท่านั้น\n" +
-          "วิธีแก้: ใช้ https, เปิดผ่าน localhost, หรือเปิด flags: Insecure origins treated as secure แล้วใส่โดเมนนี้"
+          "วิธีแก้: ใช้ https หรือเปิดผ่าน localhost"
       );
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setErr("เบราว์เซอร์นี้ไม่รองรับ getUserMedia");
-      return;
-    }
+
+    if (!navigator.mediaDevices?.getUserMedia)
+      return setErr("เบราว์เซอร์นี้ไม่รองรับ getUserMedia");
 
     stopStream();
-
     try {
-      const constraints = {
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: id ? { deviceId: { exact: id } } : { facingMode: "environment" },
         audio: false,
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      });
       streamRef.current = stream;
       await listDevices();
 
-      try {
-        const track = stream.getVideoTracks()?.[0];
-        const settings = track?.getSettings?.();
-        if (settings?.deviceId) setDeviceId(settings.deviceId);
-      } catch {}
+      const track = stream.getVideoTracks()?.[0];
+      const devId = track?.getSettings?.().deviceId;
+      if (devId) setDeviceId(devId);
 
       setCamKey((k) => k + 1);
       setIsOpen(true);
-
       setTimeout(async () => {
-        const video = videoRef.current;
-        if (!video) return;
-        video.muted = true;
-        video.playsInline = true;
-        video.srcObject = stream;
+        if (!videoRef.current) return;
+        videoRef.current.muted = true;
+        videoRef.current.playsInline = true;
+        videoRef.current.srcObject = stream;
         try {
-          await video.play();
+          await videoRef.current.play();
         } catch {}
       }, 0);
     } catch (e) {
       const name = e?.name || "";
-      if (name === "NotAllowedError") {
-        setErr("ถูกปฏิเสธสิทธิ์กล้อง กรุณาอนุญาตใน Site settings แล้วลองใหม่");
-      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
-        setErr("ไม่พบอุปกรณ์กล้องที่ใช้งานได้");
-      } else {
-        setErr("เปิดกล้องไม่สำเร็จ: " + (e.message || String(e)));
-      }
+      setErr(
+        name === "NotAllowedError"
+          ? "ถูกปฏิเสธสิทธิ์กล้อง กรุณาอนุญาตใน Site settings"
+          : name === "NotFoundError" || name === "OverconstrainedError"
+          ? "ไม่พบอุปกรณ์กล้องที่ใช้งานได้"
+          : "เปิดกล้องไม่สำเร็จ: " + (e.message || String(e))
+      );
       setIsOpen(false);
       stopStream();
     }
   };
 
-  const closeCamera = () => {
-    stopStream();
-    setIsOpen(false);
-  };
-
   const switchCamera = async () => {
     if (devices.length < 2) return;
-    const idx = devices.findIndex((d) => d.deviceId === deviceId);
-    const next = devices[(idx + 1) % devices.length];
+    const i = devices.findIndex((d) => d.deviceId === deviceId);
+    const next = devices[(i + 1) % devices.length];
     await openCamera(next.deviceId);
   };
 
   const takeShot = () => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+    const v = videoRef.current;
+    const c = canvasRef.current;
+    if (!v || !c) return;
 
-    const w = video.videoWidth || 1280;
-    const h = video.videoHeight || 720;
-    canvas.width = w;
-    canvas.height = h;
+    const w = v.videoWidth || 1280;
+    const h = v.videoHeight || 720;
+    c.width = w;
+    c.height = h;
+    c.getContext("2d").drawImage(v, 0, 0, w, h);
 
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, w, h);
-
-    canvas.toBlob(
+    c.toBlob(
       (blob) => {
         if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-        onCapture?.({ blob, url, dataUrl });
-        closeCamera();
+        onCapture?.({
+          blob,
+          url: URL.createObjectURL(blob),
+          dataUrl: c.toDataURL("image/jpeg", 0.9),
+        });
+        setIsOpen(false);
+        stopStream();
       },
       "image/jpeg",
       0.9
@@ -150,8 +139,8 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState !== "visible") {
-        stopStream();
         setIsOpen(false);
+        stopStream();
       }
     };
     document.addEventListener("visibilitychange", onVis);
@@ -167,26 +156,24 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <p className={labelCls}>{title}</p>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => openCamera()}
-            disabled={disabled}
-            className={cls(
-              "px-3 py-1.5 rounded-lg border text-sm",
-              disabled
-                ? "border-slate-200 text-slate-400"
-                : "border-slate-300 hover:bg-slate-50"
-            )}
-          >
-            เปิดกล้อง
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => openCamera()}
+          disabled={disabled}
+          className={cx(
+            "px-3 py-1.5 rounded-lg border text-sm",
+            disabled
+              ? "border-slate-200 text-slate-400"
+              : "border-slate-300 hover:bg-slate-50"
+          )}
+        >
+          เปิดกล้อง
+        </button>
       </div>
 
       <div className="flex items-center gap-2">
         <select
-          className={cls(inputCls, "max-w-full")}
+          className={cx(inputCls, "max-w-full")}
           value={deviceId}
           onChange={async (e) => {
             const val = e.target.value;
@@ -205,7 +192,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
           type="button"
           onClick={switchCamera}
           disabled={devices.length < 2}
-          className={cls(
+          className={cx(
             "px-3 py-2 rounded-lg border text-sm",
             devices.length < 2
               ? "border-slate-200 text-slate-400"
@@ -217,7 +204,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
         </button>
       </div>
 
-      <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 cursor-pointer text-slate-900 text-sm">
+      <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 cursor-pointer text-sm">
         <input
           type="file"
           accept="image/*"
@@ -225,8 +212,11 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (!file) return;
-            const url = URL.createObjectURL(file);
-            onCapture?.({ blob: file, url, dataUrl: null });
+            onCapture?.({
+              blob: file,
+              url: URL.createObjectURL(file),
+              dataUrl: null,
+            });
             e.currentTarget.value = "";
           }}
           disabled={disabled}
@@ -237,11 +227,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
       {err && <p className="text-xs whitespace-pre-line text-red-600">{err}</p>}
 
       {isOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
-          role="dialog"
-          aria-modal="true"
-        >
+        <div className="fixed inset-0 z-50 bg-black/90 grid place-items-center">
           <div className="relative w-[92vw] max-w-[720px] rounded-2xl overflow-hidden border border-white/20">
             <video
               key={camKey}
@@ -254,8 +240,8 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
             <div className="p-3 bg-black/60 flex items-center justify-between">
               <button
                 onClick={() => {
-                  stopStream();
                   setIsOpen(false);
+                  stopStream();
                 }}
                 className="px-3 py-2 rounded-lg text-white/90 hover:text-white"
               >
@@ -265,7 +251,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
                 <button
                   onClick={switchCamera}
                   disabled={devices.length < 2}
-                  className={cls(
+                  className={cx(
                     "px-3 py-2 rounded-lg border text-white/90 hover:text-white",
                     devices.length < 2
                       ? "border-white/20 text-white/50"
@@ -290,7 +276,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
   );
 }
 
-/* ───────────── Admin ส่วนที่มี hooks เยอะ แยกออกมา ───────────── */
+/* ───────────────── AdminDeliveryContent ───────────────── */
 function AdminDeliveryContent() {
   const [form, setForm] = useState({
     bookingCode: "",
@@ -312,48 +298,98 @@ function AdminDeliveryContent() {
   const [idProofs, setIdProofs] = useState([]);
   const [carProofs, setCarProofs] = useState([]);
 
-  const addProof = (setFn) => (img) =>
-    setFn((prev) => [
-      ...prev,
-      { url: img.url, blob: img.blob, dataUrl: img.dataUrl },
-    ]);
+  const [queue, setQueue] = useState([]);
+  const [queueLoading, setQueueLoading] = useState(true);
+  const [queueErr, setQueueErr] = useState("");
 
-  const removeProof = (setFn) => (idx) =>
-    setFn((prev) => {
-      const cp = [...prev];
-      const item = cp[idx];
+  /* ---- fetch rentals ---- */
+  useEffect(() => {
+    (async () => {
+      setQueueLoading(true);
+      setQueueErr("");
       try {
-        if (item?.url?.startsWith("blob:")) URL.revokeObjectURL(item.url);
-      } catch {}
-      cp.splice(idx, 1);
-      return cp;
-    });
+        const res = await fetch(
+          "https://demo.erpeazy.com/api/method/erpnext.api.get_rentals",
+          {
+            method: "GET",
+            headers: new globalThis.Headers(),
+            redirect: "follow",
+          }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { message = [] } = JSON.parse(await res.text());
 
-  const handleChange = (e) => {
+        const mapped = message.map((row) => {
+          const pickupISO = row?.pickup_date
+            ? new Date(row.pickup_date.replace(" ", "T")).toISOString()
+            : "";
+          const raw = (row?.status || "").toLowerCase();
+          const status =
+            raw.includes("done") ||
+            raw.includes("return") ||
+            raw.includes("complete")
+              ? "done"
+              : "pending";
+
+          return {
+            bookingCode: row?.name || "",
+            customerName: row?.customer_name || "",
+            customerPhone: row?.customer_phone || "",
+            carName: row?.vehicle || "",
+            carPlate: (row?.license_plate || "").trim(),
+            pickupPlace: row?.pickup_place || "",
+            returnPlace: row?.return_place || "",
+            pickupLocation: row?.pickup_place || row?.pickup_location || "",
+            returnLocation: row?.return_place || row?.return_location || "",
+            pickupTime: pickupISO,
+            returnTime: row?.return_date
+              ? new Date(row.return_date.replace(" ", "T")).toISOString()
+              : "",
+            status,
+          };
+        });
+
+        setQueue(mapped);
+      } catch (e) {
+        console.error(e);
+        setQueueErr(e?.message || "โหลดคิวไม่สำเร็จ");
+      } finally {
+        setQueueLoading(false);
+      }
+    })();
+  }, []);
+
+  const onField = (e) => {
     const { name, value, type, checked } = e.target;
     setForm((f) => ({ ...f, [name]: type === "checkbox" ? checked : value }));
+  };
+
+  const clearFiles = (arr) => {
+    arr.forEach((p) => {
+      try {
+        if (p?.url?.startsWith("blob:")) URL.revokeObjectURL(p.url);
+      } catch {}
+    });
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const required = ["bookingCode", "customerName", "customerPhone"];
     const missing = required.filter((k) => !form[k]);
-    if (missing.length) {
-      alert("กรุณากรอกข้อมูลให้ครบ: " + missing.join(", "));
+    if (missing.length) return alert("กรุณากรอก: " + missing.join(", "));
+    if (
+      idProofs.length === 0 &&
+      !confirm("ยังไม่มีรูปยืนยันตัวตน บันทึกต่อหรือไม่?")
+    )
       return;
-    }
-    if (idProofs.length === 0) {
-      const ok = confirm("ยังไม่มีรูปยืนยันตัวตน ต้องการบันทึกต่อไปหรือไม่?");
-      if (!ok) return;
-    }
 
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ""));
     idProofs.forEach((p, i) =>
-      fd.append("id_proof_" + (i + 1), p.blob, `id_proof_${i + 1}.jpg`)
+      fd.append(`id_proof_${i + 1}`, p.blob, `id_proof_${i + 1}.jpg`)
     );
     carProofs.forEach((p, i) =>
-      fd.append("car_proof_" + (i + 1), p.blob, `car_proof_${i + 1}.jpg`)
+      fd.append(`car_proof_${i + 1}`, p.blob, `car_proof_${i + 1}.jpg`)
     );
 
     console.log("DELIVERY_SUBMIT_FORMDATA", {
@@ -364,70 +400,7 @@ function AdminDeliveryContent() {
     alert("บันทึกสำเร็จ (demo) — พร้อมส่งรูปเป็นไฟล์ไป backend");
   };
 
-  const sameDate = (a, b) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-
-  const fmtTime = (iso) => {
-    if (!iso) return "-";
-    const d = new Date(iso);
-    return d.toLocaleTimeString("th-TH", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const todayAt = (h, m = 0) => {
-    const d = new Date();
-    d.setHours(h, m, 0, 0);
-    return d.toISOString();
-  };
-
-  const initialQueue = useMemo(
-    () => [
-      {
-        bookingCode: "VR-2025-201",
-        customerName: "คุณเอ",
-        customerPhone: "080-111-0001",
-        carName: "Toyota Corolla Cross",
-        carPlate: "1กข-1234",
-        pickupLocation: "สนามบินเชียงใหม่ (CNX)",
-        pickupTime: todayAt(9, 30),
-        returnLocation: "สาขาสีลม",
-        returnTime: todayAt(11, 30),
-        status: "pending",
-      },
-      {
-        bookingCode: "VR-2025-202",
-        customerName: "คุณบี",
-        customerPhone: "081-222-0002",
-        carName: "Honda Civic",
-        carPlate: "ฮค-4444",
-        pickupLocation: "สาขาสีลม",
-        pickupTime: todayAt(13, 0),
-        returnLocation: "สาขาสีลม",
-        returnTime: todayAt(15, 0),
-        status: "in_progress",
-      },
-      {
-        bookingCode: "VR-2025-203",
-        customerName: "คุณซี",
-        customerPhone: "082-333-0003",
-        carName: "Isuzu D-Max",
-        carPlate: "ดม-2345",
-        pickupLocation: "สาขาสีลม",
-        pickupTime: todayAt(17, 30),
-        returnLocation: "สาขาสีลม",
-        returnTime: todayAt(19, 0),
-        status: "done",
-      },
-    ],
-    []
-  );
-
-  const [queue] = useState(initialQueue);
-
+  /* ---- fill form when click "เปิดฟอร์ม" ---- */
   const loadToForm = (j) => {
     setForm((f) => ({
       ...f,
@@ -436,14 +409,10 @@ function AdminDeliveryContent() {
       carName: j.carName || "",
       customerName: j.customerName || "",
       customerPhone: j.customerPhone || "",
-      pickupLocation: j.pickupLocation || "",
-      pickupTime: j.pickupTime
-        ? new Date(j.pickupTime).toISOString().slice(0, 16)
-        : "",
-      returnLocation: j.returnLocation || "",
-      returnTime: j.returnTime
-        ? new Date(j.returnTime).toISOString().slice(0, 16)
-        : "",
+      pickupLocation: j.pickupPlace ?? j.pickupLocation ?? "",
+      pickupTime: toLocalInputDT(j.pickupTime),
+      returnLocation: j.returnPlace ?? j.returnLocation ?? "",
+      returnTime: toLocalInputDT(j.returnTime),
     }));
     try {
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -453,7 +422,7 @@ function AdminDeliveryContent() {
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-8">
       {/* ซ้าย: ฟอร์ม */}
-      <section className={`${cardCls} p-6 md:p-8`}>
+      <section className={cx(cardCls, "p-6 md:p-8")}>
         <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
           Delivery Staff{" "}
           <span className="text-xs ml-2 align-middle rounded bg-green-100 text-green-700 px-2 py-0.5">
@@ -465,17 +434,17 @@ function AdminDeliveryContent() {
         </p>
 
         <form className="mt-6 grid gap-6" onSubmit={handleSubmit}>
-          {/* ข้อมูลการจอง / รถ */}
+          {/* booking / car */}
           <div className="grid md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <label className={labelCls}>รหัสการจอง *</label>
               <input
                 name="bookingCode"
                 className={inputCls}
-                placeholder="เช่น VR-2025-000123"
                 value={form.bookingCode}
-                onChange={handleChange}
+                onChange={onField}
                 required
+                placeholder="เช่น VR-2025-000123"
               />
             </div>
             <div className="space-y-2">
@@ -483,9 +452,9 @@ function AdminDeliveryContent() {
               <input
                 name="carPlate"
                 className={inputCls}
-                placeholder="1กก-1234"
                 value={form.carPlate}
-                onChange={handleChange}
+                onChange={onField}
+                placeholder="1กก-1234"
               />
             </div>
             <div className="space-y-2">
@@ -493,24 +462,24 @@ function AdminDeliveryContent() {
               <input
                 name="carName"
                 className={inputCls}
-                placeholder="Toyota Corolla Cross"
                 value={form.carName}
-                onChange={handleChange}
+                onChange={onField}
+                placeholder="Toyota Corolla Cross"
               />
             </div>
           </div>
 
-          {/* ลูกค้า */}
+          {/* customer */}
           <div className="grid md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <label className={labelCls}>ชื่อลูกค้า *</label>
               <input
                 name="customerName"
                 className={inputCls}
-                placeholder="ชื่อ–นามสกุล"
                 value={form.customerName}
-                onChange={handleChange}
+                onChange={onField}
                 required
+                placeholder="ชื่อ–นามสกุล"
               />
             </div>
             <div className="space-y-2">
@@ -518,10 +487,10 @@ function AdminDeliveryContent() {
               <input
                 name="customerPhone"
                 className={inputCls}
-                placeholder="080-000-0000"
                 value={form.customerPhone}
-                onChange={handleChange}
+                onChange={onField}
                 required
+                placeholder="080-000-0000"
               />
             </div>
             <div className="space-y-2">
@@ -529,23 +498,23 @@ function AdminDeliveryContent() {
               <input
                 name="customerId"
                 className={inputCls}
-                placeholder="เลขบัตร/ใบขับขี่/Passport"
                 value={form.customerId}
-                onChange={handleChange}
+                onChange={onField}
+                placeholder="เลขบัตร/ใบขับขี่/Passport"
               />
             </div>
           </div>
 
-          {/* สถานที่/เวลา */}
+          {/* pickup / return */}
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className={labelCls}>สถานที่ส่งมอบ</label>
               <input
                 name="pickupLocation"
                 className={inputCls}
-                placeholder="เช่น สนามบินเชียงใหม่ (CNX)"
                 value={form.pickupLocation}
-                onChange={handleChange}
+                onChange={onField}
+                placeholder="เช่น สนามบินเชียงใหม่ (CNX)"
               />
             </div>
             <div className="space-y-2">
@@ -555,21 +524,20 @@ function AdminDeliveryContent() {
                 name="pickupTime"
                 className={inputCls}
                 value={form.pickupTime}
-                onChange={handleChange}
+                onChange={onField}
               />
             </div>
           </div>
 
-          {/* คืนรถ */}
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className={labelCls}>สถานที่นัดคืนรถ</label>
               <input
                 name="returnLocation"
                 className={inputCls}
-                placeholder="เช่น สาขาสยามพารากอน"
                 value={form.returnLocation}
-                onChange={handleChange}
+                onChange={onField}
+                placeholder="เช่น สาขาสีลม"
               />
             </div>
             <div className="space-y-2">
@@ -579,12 +547,12 @@ function AdminDeliveryContent() {
                 name="returnTime"
                 className={inputCls}
                 value={form.returnTime}
-                onChange={handleChange}
+                onChange={onField}
               />
             </div>
           </div>
 
-          {/* สถานะ/ตัวเลข */}
+          {/* numbers / flags */}
           <div className="grid md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <label className={labelCls}>ระดับน้ำมัน</label>
@@ -592,7 +560,7 @@ function AdminDeliveryContent() {
                 name="fuelLevel"
                 className={inputCls}
                 value={form.fuelLevel}
-                onChange={handleChange}
+                onChange={onField}
               >
                 <option value="full">เต็มถัง</option>
                 <option value="3/4">3/4</option>
@@ -606,9 +574,9 @@ function AdminDeliveryContent() {
               <input
                 name="odometer"
                 className={inputCls}
-                placeholder="เช่น 35,420"
                 value={form.odometer}
-                onChange={handleChange}
+                onChange={onField}
+                placeholder="เช่น 35,420"
               />
             </div>
             <div className="space-y-2">
@@ -618,7 +586,7 @@ function AdminDeliveryContent() {
                   type="checkbox"
                   name="depositReceived"
                   checked={form.depositReceived}
-                  onChange={handleChange}
+                  onChange={onField}
                   className="h-4 w-4 accent-black"
                 />
                 ได้รับเรียบร้อย
@@ -626,7 +594,7 @@ function AdminDeliveryContent() {
             </div>
           </div>
 
-          {/* ประเภทเอกสารที่ตรวจ */}
+          {/* verify type */}
           <div className="grid md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <label className={labelCls}>เอกสารที่ใช้ยืนยัน</label>
@@ -634,7 +602,7 @@ function AdminDeliveryContent() {
                 name="verifyType"
                 className={inputCls}
                 value={form.verifyType}
-                onChange={handleChange}
+                onChange={onField}
               >
                 <option value="citizen_id">บัตรประชาชน</option>
                 <option value="driver_license">ใบขับขี่</option>
@@ -643,28 +611,43 @@ function AdminDeliveryContent() {
             </div>
           </div>
 
-          {/* กล้อง/อัปโหลด: เอกสารยืนยัน */}
+          {/* proofs: id */}
           <div className="space-y-3">
             <CameraBox
               title="ถ่ายรูปเอกสารยืนยันตัวตน (บัตร/ใบขับขี่/Passport)"
-              onCapture={addProof(setIdProofs)}
+              onCapture={(img) =>
+                setIdProofs((p) => [
+                  ...p,
+                  { url: img.url, blob: img.blob, dataUrl: img.dataUrl },
+                ])
+              }
               buttonLabel="ถ่ายหลักฐาน"
             />
-            {idProofs.length > 0 && (
+            {!!idProofs.length && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {idProofs.map((p, idx) => (
+                {idProofs.map((p, i) => (
                   <div
-                    key={idx}
+                    key={i}
                     className="relative rounded-lg overflow-hidden border border-slate-300"
                   >
                     <img
                       src={p.dataUrl || p.url}
-                      alt={`ID Proof ${idx + 1}`}
+                      alt={`ID Proof ${i + 1}`}
                       className="w-full h-32 object-cover"
                     />
                     <button
                       type="button"
-                      onClick={() => removeProof(setIdProofs)(idx)}
+                      onClick={() =>
+                        setIdProofs((prev) => {
+                          const cp = [...prev];
+                          try {
+                            if (cp[i]?.url?.startsWith("blob:"))
+                              URL.revokeObjectURL(cp[i].url);
+                          } catch {}
+                          cp.splice(i, 1);
+                          return cp;
+                        })
+                      }
                       className="absolute top-1 right-1 px-2 py-0.5 text-xs rounded bg-black/70 text-white"
                     >
                       ลบ
@@ -675,28 +658,43 @@ function AdminDeliveryContent() {
             )}
           </div>
 
-          {/* กล้อง/อัปโหลด: สภาพรถ */}
+          {/* proofs: car */}
           <div className="space-y-3">
             <CameraBox
               title="ถ่ายรูปสภาพรถตอนส่งมอบ (รอย/ล้อ/มุมต่าง ๆ)"
-              onCapture={addProof(setCarProofs)}
+              onCapture={(img) =>
+                setCarProofs((p) => [
+                  ...p,
+                  { url: img.url, blob: img.blob, dataUrl: img.dataUrl },
+                ])
+              }
               buttonLabel="ถ่ายรูปสภาพรถ"
             />
-            {carProofs.length > 0 && (
+            {!!carProofs.length && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {carProofs.map((p, idx) => (
+                {carProofs.map((p, i) => (
                   <div
-                    key={idx}
+                    key={i}
                     className="relative rounded-lg overflow-hidden border border-slate-300"
                   >
                     <img
                       src={p.dataUrl || p.url}
-                      alt={`Car Proof ${idx + 1}`}
+                      alt={`Car Proof ${i + 1}`}
                       className="w-full h-32 object-cover"
                     />
                     <button
                       type="button"
-                      onClick={() => removeProof(setCarProofs)(idx)}
+                      onClick={() =>
+                        setCarProofs((prev) => {
+                          const cp = [...prev];
+                          try {
+                            if (cp[i]?.url?.startsWith("blob:"))
+                              URL.revokeObjectURL(cp[i].url);
+                          } catch {}
+                          cp.splice(i, 1);
+                          return cp;
+                        })
+                      }
                       className="absolute top-1 right-1 px-2 py-0.5 text-xs rounded bg-black/70 text-white"
                     >
                       ลบ
@@ -707,20 +705,20 @@ function AdminDeliveryContent() {
             )}
           </div>
 
-          {/* หมายเหตุ */}
+          {/* notes */}
           <div className="space-y-2">
             <label className={labelCls}>หมายเหตุเพิ่มเติม</label>
             <textarea
               name="notes"
               className={inputCls}
               rows={4}
-              placeholder="เช่น มีรอยขีดข่วนบริเวณกันชนหน้า..."
               value={form.notes}
-              onChange={handleChange}
+              onChange={onField}
+              placeholder="เช่น มีรอยขีดข่วนบริเวณกันชนหน้า..."
             />
           </div>
 
-          {/* ปุ่ม */}
+          {/* action buttons */}
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               type="button"
@@ -742,24 +740,10 @@ function AdminDeliveryContent() {
                   fuelLevel: "full",
                   odometer: "",
                 });
-                setIdProofs((prev) => {
-                  prev.forEach((p) => {
-                    try {
-                      if (p?.url?.startsWith("blob:"))
-                        URL.revokeObjectURL(p.url);
-                    } catch {}
-                  });
-                  return [];
-                });
-                setCarProofs((prev) => {
-                  prev.forEach((p) => {
-                    try {
-                      if (p?.url?.startsWith("blob:"))
-                        URL.revokeObjectURL(p.url);
-                    } catch {}
-                  });
-                  return [];
-                });
+                clearFiles(idProofs);
+                clearFiles(carProofs);
+                setIdProofs([]);
+                setCarProofs([]);
               }}
               className="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
             >
@@ -773,10 +757,19 @@ function AdminDeliveryContent() {
             </button>
           </div>
         </form>
+
+        {queueLoading && (
+          <p className="text-xs mt-3 text-slate-500">กำลังโหลดคิววันนี้...</p>
+        )}
+        {queueErr && (
+          <p className="text-xs mt-3 text-red-600">
+            โหลดคิวล้มเหลว: {queueErr}
+          </p>
+        )}
       </section>
 
       {/* ขวา: สรุปโดยย่อ */}
-      <aside className={`${cardCls} p-6 md:p-8 h-fit`}>
+      <aside className={cx(cardCls, "p-6 md:p-8 h-fit")}>
         <h3 className="text-lg font-bold">สรุปโดยย่อ</h3>
         <div className="mt-4 text-sm space-y-2">
           <div className="flex justify-between">
@@ -832,7 +825,7 @@ function AdminDeliveryContent() {
       </aside>
 
       {/* ขวา: คิววันนี้ */}
-      <aside className={`${cardCls} p-6 md:p-8 h-fit`}>
+      <aside className={cx(cardCls, "p-6 md:p-8 h-fit")}>
         <h3 className="text-lg font-bold">คิววันนี้ (Today)</h3>
         <p className="text-slate-600 text-sm mt-1">
           แสดงเฉพาะงานรับรถที่นัดหมาย “วันนี้”
@@ -843,24 +836,26 @@ function AdminDeliveryContent() {
   );
 }
 
-/* แยก TodayQueue เป็น component ของตัวเอง (มี useMemo ของตัวเอง) */
+/* ───────────────── TodayQueue ───────────────── */
 function TodayQueue({ queue, onPick }) {
   const sameDate = (a, b) =>
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
 
-  const fmtTime = (iso) => {
-    if (!iso) return "-";
-    const d = new Date(iso);
-    return d.toLocaleTimeString("th-TH", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
+  const fmtTime = (iso) =>
+    iso
+      ? new Date(iso).toLocaleTimeString("th-TH", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "-";
 
   const todayQueue = useMemo(
-    () => queue.filter((j) => sameDate(new Date(j.pickupTime), new Date())),
+    () =>
+      queue.filter(
+        (j) => j.pickupTime && sameDate(new Date(j.pickupTime), new Date())
+      ),
     [queue]
   );
 
@@ -874,6 +869,7 @@ function TodayQueue({ queue, onPick }) {
             <th className="py-2 pr-3 text-left">รถ / ป้าย</th>
             <th className="py-2 pr-3 text-left">ลูกค้า</th>
             <th className="py-2 pr-3 text-left">สถานะ</th>
+            <th className="py-2 pr-3 text-left">สถานที่</th>
             <th className="py-2 pr-0 text-left">จัดการ</th>
           </tr>
         </thead>
@@ -891,20 +887,25 @@ function TodayQueue({ queue, onPick }) {
                 <div className="text-xs text-slate-600">{j.customerPhone}</div>
               </td>
               <td className="py-2 pr-3">
-                <span
-                  className={cls(
-                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                    j.status === "pending" && "bg-amber-100 text-amber-800",
-                    j.status === "in_progress" && "bg-blue-100 text-blue-800",
-                    j.status === "done" && "bg-emerald-100 text-emerald-800"
-                  )}
-                >
-                  {j.status === "pending"
-                    ? "รอส่งมอบ"
-                    : j.status === "in_progress"
-                    ? "กำลังดำเนินการ"
-                    : "เสร็จแล้ว"}
-                </span>
+                {(() => {
+                  const s = STATUS[j.status] ?? STATUS.pending;
+                  return (
+                    <span
+                      className={cx(
+                        "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
+                        s.badge
+                      )}
+                    >
+                      {s.label}
+                    </span>
+                  );
+                })()}
+              </td>
+              <td className="py-2 pr-3">
+                <div>{j.pickupPlace || j.pickupLocation || "-"}</div>
+                <div className="text-xs text-slate-600">
+                  คืน: {j.returnPlace || j.returnLocation || "-"}
+                </div>
               </td>
               <td className="py-2 pr-0">
                 <button
@@ -918,9 +919,9 @@ function TodayQueue({ queue, onPick }) {
               </td>
             </tr>
           ))}
-          {todayQueue.length === 0 && (
+          {!todayQueue.length && (
             <tr>
-              <td colSpan={6} className="py-4 text-center text-slate-500">
+              <td colSpan={7} className="py-4 text-center text-slate-500">
                 วันนี้ยังไม่มีคิวรับรถ
               </td>
             </tr>
@@ -931,7 +932,7 @@ function TodayQueue({ queue, onPick }) {
   );
 }
 
-/* ───────────── Gate Component (คงลำดับ hooks เสมอ) ───────────── */
+/* ───────────────── Gate ───────────────── */
 export default function DeliveryStaffPage() {
   const [auth, setAuth] = useState({
     loading: true,
@@ -943,7 +944,7 @@ export default function DeliveryStaffPage() {
   useEffect(() => {
     let ignore = false;
 
-    // preload จาก localStorage
+    // preload quick UX
     try {
       const isAdminLocal =
         (localStorage.getItem("vrent_is_admin") || "false").toLowerCase() ===
@@ -968,7 +969,7 @@ export default function DeliveryStaffPage() {
       );
     } catch {}
 
-    // ยืนยันกับ backend
+    // verify with backend
     (async () => {
       try {
         const userIdLS = (localStorage.getItem("vrent_user_id") || "").trim();
@@ -1018,11 +1019,11 @@ export default function DeliveryStaffPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-white text-slate-900">
-      <Headers />
+      <Header />
       <main className="flex-grow">
         {auth.loading ? (
           <div className="max-w-3xl mx-auto p-8">
-            <div className={`${cardCls} p-8 text-center`}>
+            <div className={cx(cardCls, "p-8 text-center")}>
               <p className="text-lg font-semibold">กำลังตรวจสอบสิทธิ์...</p>
               <p className="text-slate-600 mt-1 text-sm">
                 กรุณารอสักครู่ ระบบกำลังตรวจสอบสิทธิ์ผู้ใช้งาน
@@ -1031,7 +1032,7 @@ export default function DeliveryStaffPage() {
           </div>
         ) : !auth.isAdmin ? (
           <div className="max-w-3xl mx-auto p-8">
-            <div className={`${cardCls} p-8 text-center`}>
+            <div className={cx(cardCls, "p-8 text-center")}>
               <h1 className="text-2xl font-extrabold tracking-tight">
                 ไม่สามารถเข้าถึงได้
               </h1>
@@ -1039,12 +1040,11 @@ export default function DeliveryStaffPage() {
                 หน้านี้สำหรับผู้ดูแลระบบเท่านั้น
               </p>
               <div className="mt-5">
-                <a
-                  href="/"
-                  className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 inline-block"
-                >
-                  กลับหน้าแรก
-                </a>
+                <Link href="/">
+                  <div className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 inline-block">
+                    กลับหน้าแรก
+                  </div>
+                </Link>
               </div>
               {(auth.email || auth.name) && (
                 <p className="text-xs text-slate-500 mt-3">

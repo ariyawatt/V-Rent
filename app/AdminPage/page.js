@@ -529,8 +529,8 @@ export default function AdminPage() {
         carPlate: "1กข 1234",
         pickupLocation: "สนามบินเชียงใหม่ (CNX)",
         pickupTime: localToIsoPreserveWallTime("2025-09-09T09:30"),
-        returnLocation: "สาขาสีลม",
-        returnTime: localToIsoPreserveWallTime("2025-09-11T11:30"),
+        returnLocation: "สาขาหาดใหญ่",
+        returnTime: localToIsoPreserveWallTime("2025-09-20T11:30"),
         verifyType: "บัตรประชาชน",
         depositReceived: true,
         fuelLevel: "เต็มถัง",
@@ -654,7 +654,7 @@ export default function AdminPage() {
         pickupLocation: "สาขาสีลม",
         pickupTime: localToIsoPreserveWallTime("2025-09-08T10:00"),
         returnLocation: "สาขาสีลม",
-        returnTime: localToIsoPreserveWallTime("2025-09-10T10:00"),
+        returnTime: localToIsoPreserveWallTime("2025-09-20T10:00"),
         extras: [],
         discount: 0,
         deposit: 0,
@@ -1210,7 +1210,7 @@ export default function AdminPage() {
     status: "ออนไลน์",
     phone: "081-234-5678",
     email: "admin@vrent.com",
-    branch: "สาขาสีลม",
+    branch: "หาดใหญ่",
     shift: "กะเช้า (09:00–18:00)",
     startDate: "2023-05-10",
     lastLogin: "2025-08-15 09:42",
@@ -1287,12 +1287,6 @@ export default function AdminPage() {
                   </div>
                   <div className="text-sm text-gray-600">{employee.role}</div>
                   <div className="grid grid-cols-1 gap-y-1.5 text-sm text-gray-800 mt-3">
-                    <div>
-                      รหัสพนักงาน:{" "}
-                      <span className="font-medium text-black">
-                        {employee.id}
-                      </span>
-                    </div>
                     <div>สาขา: {employee.branch}</div>
                     <div>กะทำงาน: {employee.shift}</div>
                     <div>เริ่มงาน: {employee.startDate}</div>
