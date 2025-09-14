@@ -1,24 +1,122 @@
 // components/admin/AddCarCard.jsx
-import { useRef } from "react";
+"use client";
 
-// props ที่ต้องส่งเข้า:
-// - form: state ของฟอร์มรถ
-// - onChange: fn(e) อัปเดตค่าในฟอร์ม (controlled inputs)
-// - onSubmit: fn(e) เมื่อกดเพิ่มรถ
-// - onImageChange: fn(e) เปลี่ยนรูป
-// - fileRef (optional): ใครอยากล้างค่า input[type=file] ภายนอก สามารถส่ง ref มาด้วย
+import { useRef, useState, useEffect } from "react";
+
+const ERP_CREATE_URL =
+  "https://demo.erpeazy.com/api/method/erpnext.api.create_vehicle";
+// const ERP_AUTH = "token xxx:yyy";
+
 export default function AddCarCard({
   form,
-  onChange,
-  onSubmit,
-  onImageChange,
+  onChange, // optional (จะถูกเรียกควบคู่กับการอัปเดต localForm)
+  onImageChange, // optional (ถ้า parent อยากทำ preview เอง)
   fileRef: externalFileRef,
+  onCreated, // optional: callback เมื่อสร้างสำเร็จ
 }) {
   const internalFileRef = useRef(null);
   const fileRef = externalFileRef ?? internalFileRef;
 
-  const clearImage = () => {
-    if (fileRef.current) fileRef.current.value = "";
+  // ---------- Local fallback state ----------
+  const [localForm, setLocalForm] = useState(() => normalizeForm(form));
+  useEffect(() => {
+    // ถ้า parent เปลี่ยน form (เช่น เคลียร์), sync ลง local
+    setLocalForm(normalizeForm(form));
+  }, [form]);
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLocalChange = (e) => {
+    // รองรับทั้ง event จริง และ object แบบ { target: { name, value } }
+    const { name, value } = e?.target ?? {};
+    if (!name) return;
+
+    setLocalForm((prev) => {
+      const next = { ...prev, [name]: value ?? "" };
+      return next;
+    });
+
+    // แจ้ง parent (ถ้ามี)
+    if (typeof onChange === "function") onChange(e);
+  };
+
+  const handleLocalImageChange = (e) => {
+    // ทำ preview ภายในให้ใช้งานได้ทันที
+    const file = e?.target?.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setLocalForm((prev) => ({ ...prev, imageData: String(reader.result) }));
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setLocalForm((prev) => ({ ...prev, imageData: "" }));
+    }
+
+    // แจ้ง parent (ถ้ามี)
+    if (typeof onImageChange === "function") onImageChange(e);
+  };
+
+  const clearImageInput = () => {
+    if (fileRef?.current) fileRef.current.value = "";
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (saving) return;
+
+    try {
+      setSaving(true);
+      setError("");
+
+      const fd = new FormData();
+      const file = fileRef.current?.files?.[0];
+      if (file) {
+        fd.append("file", file, file.name);
+      }
+      fd.append("license_plate", localForm.licensePlate || "");
+      fd.append("vehicle_name", localForm.name || "");
+      fd.append("status", localForm.status || "ว่าง");
+      fd.append("price", String(localForm.pricePerDay || 0));
+      fd.append("company", localForm.company || "");
+      fd.append("type", localForm.type || "Sedan");
+      fd.append("v_type", localForm.type || "Sedan");
+      fd.append("brand", localForm.brand || "");
+      fd.append("seat", String(localForm.seats || ""));
+      fd.append("year", String(localForm.year || ""));
+      fd.append("gear_system", localForm.transmission || "อัตโนมัติ");
+      fd.append("fuel_type", localForm.fuel || "เบนซิน");
+      fd.append("description", localForm.description || "");
+
+      const headers = new Headers();
+      // headers.set("Authorization", ERP_AUTH);
+
+      const res = await fetch(ERP_CREATE_URL, {
+        method: "POST",
+        headers,
+        body: fd,
+        credentials: "include",
+        redirect: "follow",
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Create failed (${res.status}) ${txt}`.trim());
+      }
+
+      clearImageInput();
+
+      alert("เพิ่มรถสำเร็จ");
+
+      // ✅ รีเฟรชหน้านี้อัตโนมัติ 1 ครั้ง
+      window.location.reload();
+    } catch (err) {
+      setError(err?.message || "เพิ่มรถไม่สำเร็จ");
+      alert(err?.message || "เพิ่มรถไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -26,7 +124,7 @@ export default function AddCarCard({
       <h2 className="text-lg font-bold text-black">เพิ่มรถเพื่อเช่า</h2>
 
       <form
-        onSubmit={onSubmit}
+        onSubmit={handleSubmit}
         className="mt-4 grid grid-cols-1 xl:grid-cols-6 gap-3"
       >
         {/* ชื่อรถ / ยี่ห้อ / ประเภท */}
@@ -37,8 +135,8 @@ export default function AddCarCard({
           <input
             type="text"
             name="name"
-            value={form.name}
-            onChange={onChange}
+            value={localForm.name}
+            onChange={handleLocalChange}
             placeholder="เช่น Toyota Corolla Cross"
             required
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
@@ -51,8 +149,8 @@ export default function AddCarCard({
           <input
             type="text"
             name="brand"
-            value={form.brand}
-            onChange={onChange}
+            value={localForm.brand}
+            onChange={handleLocalChange}
             placeholder="เช่น Toyota"
             required
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
@@ -64,8 +162,8 @@ export default function AddCarCard({
           </label>
           <select
             name="type"
-            value={form.type}
-            onChange={onChange}
+            value={localForm.type}
+            onChange={handleLocalChange}
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
           >
             <option>Sedan</option>
@@ -84,8 +182,8 @@ export default function AddCarCard({
           </label>
           <select
             name="transmission"
-            value={form.transmission}
-            onChange={onChange}
+            value={localForm.transmission}
+            onChange={handleLocalChange}
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
           >
             <option value="อัตโนมัติ">อัตโนมัติ (Auto)</option>
@@ -99,8 +197,8 @@ export default function AddCarCard({
           <input
             type="text"
             name="licensePlate"
-            value={form.licensePlate}
-            onChange={onChange}
+            value={localForm.licensePlate}
+            onChange={handleLocalChange}
             placeholder="เช่น 1กข 1234 กรุงเทพฯ"
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
           />
@@ -113,8 +211,8 @@ export default function AddCarCard({
             type="number"
             min="1"
             name="seats"
-            value={form.seats}
-            onChange={onChange}
+            value={String(localForm.seats ?? "")}
+            onChange={handleLocalChange}
             placeholder="เช่น 5"
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
           />
@@ -127,8 +225,8 @@ export default function AddCarCard({
           </label>
           <select
             name="fuel"
-            value={form.fuel}
-            onChange={onChange}
+            value={localForm.fuel}
+            onChange={handleLocalChange}
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
           >
             <option>เบนซิน</option>
@@ -148,8 +246,8 @@ export default function AddCarCard({
             name="year"
             min="1980"
             max="2100"
-            value={form.year}
-            onChange={onChange}
+            value={String(localForm.year ?? "")}
+            onChange={handleLocalChange}
             placeholder="เช่น 2021"
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
           />
@@ -162,8 +260,8 @@ export default function AddCarCard({
             type="number"
             min="0"
             name="pricePerDay"
-            value={form.pricePerDay}
-            onChange={onChange}
+            value={String(localForm.pricePerDay ?? "")}
+            onChange={handleLocalChange}
             placeholder="เช่น 1500"
             required
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
@@ -177,8 +275,8 @@ export default function AddCarCard({
           </label>
           <select
             name="status"
-            value={form.status}
-            onChange={onChange}
+            value={localForm.status}
+            onChange={handleLocalChange}
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
           >
             <option value="ว่าง">ว่าง</option>
@@ -194,21 +292,23 @@ export default function AddCarCard({
             ref={fileRef}
             type="file"
             accept="image/*"
-            onChange={onImageChange}
+            onChange={handleLocalImageChange}
             className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:px-3 file:py-2 file:text-gray-800 hover:file:bg-gray-50"
           />
-          {form.imageData ? (
+          {localForm.imageData ? (
             <div className="mt-2">
               <img
-                src={form.imageData}
+                src={localForm.imageData}
                 alt="ตัวอย่างรูปรถ"
                 className="h-24 w-full max-w-[180px] rounded-lg border object-cover"
               />
               <button
                 type="button"
                 onClick={() => {
-                  onChange({ target: { name: "imageData", value: "" } });
-                  clearImage();
+                  handleLocalChange({
+                    target: { name: "imageData", value: "" },
+                  });
+                  clearImageInput();
                 }}
                 className="mt-2 text-xs text-gray-600 underline"
               >
@@ -230,22 +330,50 @@ export default function AddCarCard({
           <textarea
             name="description"
             rows={4}
-            value={form.description}
-            onChange={onChange}
+            value={localForm.description}
+            onChange={handleLocalChange}
             placeholder="รายละเอียด อุปกรณ์เสริม เงื่อนไขการเช่า ฯลฯ"
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black placeholder:text-gray-400"
           />
         </div>
 
+        {error && (
+          <div className="xl:col-span-6">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {error}
+            </div>
+          </div>
+        )}
+
         <div className="col-span-1 xl:col-span-6 flex justify-center pt-1">
           <button
             type="submit"
-            className="px-6 py-2.5 rounded-lg bg-black text-white font-semibold hover:bg-gray-800 transition"
+            disabled={saving}
+            className="px-6 py-2.5 rounded-lg bg-black text-white font-semibold hover:bg-gray-800 transition disabled:opacity-60"
           >
-            เพิ่มรถ
+            {saving ? "กำลังบันทึก..." : "เพิ่มรถ"}
           </button>
         </div>
       </form>
     </div>
   );
+}
+
+// ป้องกัน undefined/ชนิดไม่ตรงที่ทำให้ input “ค้าง”
+function normalizeForm(f = {}) {
+  return {
+    name: f.name ?? "",
+    brand: f.brand ?? "",
+    type: f.type ?? "Sedan",
+    transmission: f.transmission ?? "อัตโนมัติ",
+    licensePlate: f.licensePlate ?? "",
+    seats: f.seats ?? "",
+    fuel: f.fuel ?? "เบนซิน",
+    year: f.year ?? "",
+    pricePerDay: f.pricePerDay ?? "",
+    status: f.status ?? "ว่าง",
+    description: f.description ?? "",
+    company: f.company ?? "",
+    imageData: f.imageData ?? "",
+  };
 }
