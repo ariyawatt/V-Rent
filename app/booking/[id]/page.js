@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/Footer";
 import Image from "next/image";
@@ -18,32 +18,27 @@ function toLocalDateTimeInputValue(d = new Date()) {
 function isoToLocalInput(iso) {
   if (!iso) return "";
   const d = new Date(iso);
-  return isNaN(d) ? "" : toLocalDateTimeInputValue(d);
+  return Number.isNaN(d.getTime()) ? "" : toLocalDateTimeInputValue(d);
 }
 function diffDays(a, b) {
-  const ms = new Date(b) - new Date(a);
+  const ms = new Date(b).getTime() - new Date(a).getTime();
   const days = Math.ceil(ms / (1000 * 60 * 60 * 24));
   return Math.max(days, 1);
 }
 const toBool = (v) => String(v ?? "").toLowerCase() === "true";
-
-/* อ่านค่า string แบบปลอดภัย */
 const get = (sp, key, fallback = "") => sp.get(key) ?? fallback;
 
 /* ---------- Page ---------- */
 export default function BookingPage() {
+  const router = useRouter();
   const params = useParams();
   const search = useSearchParams();
 
-  // id จาก path (อาจเป็น slug หรือ docname จริง)
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
 
-  // ---------- ดึง "ข้อมูลรถจาก query" ถ้ามี ----------
-  // แนะนำให้ส่งค่าตามนี้มาจากหน้า /cars/[id] ตอนกด "จองรถคันนี้":
-  // &carName=&carBrand=&carType=&carYear=&carTransmission=&carSeats=&carFuel=
-  // &pricePerDay=&companyName=&companySlug=&carImage=
+  // ---------- รถจาก query/fallback ----------
   const carFromQuery = {
-    id: id,
+    id,
     name: get(search, "carName"),
     brand: get(search, "carBrand"),
     type: get(search, "carType"),
@@ -59,10 +54,8 @@ export default function BookingPage() {
     image: get(search, "carImage"),
   };
 
-  // ถ้า query ไม่มี ให้ fallback เป็น mock
   const carFallback = useMemo(() => getCarById(String(id)), [id]);
 
-  // รวมเป็น car ปัจจุบัน (query > fallback)
   const car = useMemo(() => {
     const c = carFromQuery;
     const hasQueryCar =
@@ -95,30 +88,30 @@ export default function BookingPage() {
         description: carFallback?.description || "",
       };
     }
-    return carFallback
-      ? carFallback
-      : {
-          id,
-          name: "Vehicle",
-          brand: "",
-          type: "",
-          year: "",
-          transmission: "",
-          seats: "",
-          fuel: "",
-          pricePerDay: 0,
-          company: { name: "V-Rent Partner", slug: "partner" },
-          image: "/noimage.jpg",
-          description: "",
-        };
+    return (
+      carFallback || {
+        id,
+        name: "Vehicle",
+        brand: "",
+        type: "",
+        year: "",
+        transmission: "",
+        seats: "",
+        fuel: "",
+        pricePerDay: 0,
+        company: { name: "V-Rent Partner", slug: "partner" },
+        image: "/noimage.jpg",
+        description: "",
+      }
+    );
   }, [carFromQuery, carFallback, id]);
 
-  // ---------- เงื่อนไขจากหน้าแรกที่ถูกส่งต่อ ----------
+  // ---------- เงื่อนไขจาก search ----------
   const pickup_at_iso = get(search, "pickup_at");
   const return_at_iso = get(search, "return_at");
   const pickupAt_q = get(search, "pickupAt");
   const dropoffAt_q = get(search, "dropoffAt");
-  const key = get(search, "key"); // ถ้ามี
+  const key = get(search, "key");
 
   const passengers = Number(get(search, "passengers") || 1);
   const promo = get(search, "promo");
@@ -126,11 +119,17 @@ export default function BookingPage() {
   const pickupLocation_q = get(search, "pickupLocation");
   const dropoffLocation_q = get(search, "dropoffLocation");
 
-  const now = new Date();
-  const defaultPick = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-  const defaultDrop = new Date(defaultPick.getTime() + 24 * 60 * 60 * 1000);
+  const now = useMemo(() => new Date(), []);
+  const defaultPick = useMemo(
+    () => new Date(now.getTime() + 2 * 60 * 60 * 1000),
+    [now]
+  );
+  const defaultDrop = useMemo(
+    () => new Date(defaultPick.getTime() + 24 * 60 * 60 * 1000),
+    [defaultPick]
+  );
 
-  // ---------- พรีฟิลฟอร์ม ----------
+  // ---------- form ----------
   const [form, setForm] = useState({
     pickupLocation: pickupLocation_q || "",
     dropoffLocation: dropoffLocation_q || "",
@@ -153,6 +152,84 @@ export default function BookingPage() {
     note: get(search, "note"),
   });
 
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Prefill จาก localStorage -> เรียก /api/erp/me พร้อม x-user-id/x-email
+  useEffect(() => {
+    let ignore = false;
+
+    try {
+      const idLS = localStorage.getItem("vrent_user_id") || "";
+      const fullNameLS =
+        localStorage.getItem("vrent_full_name") ||
+        localStorage.getItem("vrent_user_name") ||
+        "";
+      const emailLS =
+        localStorage.getItem("vrent_login_email") ||
+        (idLS.includes("@") ? idLS : "");
+      const phoneLS = localStorage.getItem("vrent_phone") || "";
+      const isAdminLocal =
+        (localStorage.getItem("vrent_is_admin") || "false").toLowerCase() ===
+        "true";
+
+      setForm((prev) => ({
+        ...prev,
+        name: prev.name || fullNameLS || "",
+        email: prev.email || emailLS || "",
+        phone: prev.phone || phoneLS || "",
+      }));
+      if (isAdminLocal) setIsAdmin(true);
+    } catch {}
+
+    (async () => {
+      try {
+        const userIdLS = (localStorage.getItem("vrent_user_id") || "").trim();
+        const emailLS =
+          (localStorage.getItem("vrent_login_email") || "").trim() ||
+          (localStorage.getItem("vrent_user_id") || "").trim();
+
+        const qp = new URLSearchParams();
+        if (userIdLS) qp.set("user_id", userIdLS);
+        if (emailLS) qp.set("email", emailLS);
+
+        const headers = {};
+        if (userIdLS) headers["x-user-id"] = userIdLS;
+        if (emailLS) headers["x-email"] = emailLS;
+
+        const r = await fetch(`/api/erp/me?${qp.toString()}`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+          headers,
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (ignore || !j?.ok) return;
+
+        const u = j.user || {};
+        setForm((prev) => ({
+          ...prev,
+          name:
+            prev.name || u.fullName || (u.email ? u.email.split("@")[0] : ""),
+          email: prev.email || u.email || "",
+          phone: prev.phone || u.phone || "",
+        }));
+        setIsAdmin((p) => p || !!u.isAdmin);
+
+        try {
+          if (u.fullName) localStorage.setItem("vrent_full_name", u.fullName);
+          if (u.email) localStorage.setItem("vrent_login_email", u.email);
+          if (u.phone) localStorage.setItem("vrent_phone", u.phone);
+          localStorage.setItem("vrent_is_admin", String(!!u.isAdmin));
+        } catch {}
+      } catch {}
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
   // ---------- คำนวณราคา ----------
   const dayCount = useMemo(
     () => diffDays(form.pickupAt, form.dropoffAt),
@@ -168,6 +245,7 @@ export default function BookingPage() {
   const basePrice = (car?.pricePerDay || 0) * dayCount;
   const total = basePrice + extrasPrice;
 
+  // บังคับ dropoffAt > pickupAt
   useEffect(() => {
     if (new Date(form.dropoffAt) <= new Date(form.pickupAt)) {
       const next = new Date(
@@ -175,7 +253,7 @@ export default function BookingPage() {
       );
       setForm((f) => ({ ...f, dropoffAt: toLocalDateTimeInputValue(next) }));
     }
-  }, [form.pickupAt]);
+  }, [form.pickupAt, form.dropoffAt]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -187,12 +265,62 @@ export default function BookingPage() {
     }
   };
 
-  const minDateTime = toLocalDateTimeInputValue(new Date());
+  const minDateTime = useMemo(() => toLocalDateTimeInputValue(new Date()), []);
   const labelCls = "text-sm font-semibold text-slate-800";
   const inputCls =
     "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black";
   const cardCls = "bg-white rounded-2xl shadow-lg border border-slate-200";
   const passthroughQS = search.toString();
+
+  const pickupDisplay = isoToLocalInput(pickup_at_iso) || form.pickupAt;
+  const returnDisplay = isoToLocalInput(return_at_iso) || form.dropoffAt;
+
+  // ---------- ไปหน้า Choose Payment ----------
+  const goToPayment = () => {
+    const qp = new URLSearchParams({
+      // ฟอร์ม
+      pickupAt: form.pickupAt,
+      dropoffAt: form.dropoffAt,
+      pickupLocation: form.pickupLocation,
+      dropoffLocation: form.dropoffLocation,
+      name: form.name || "",
+      phone: form.phone || "",
+      email: form.email || "",
+      childSeat: String(form.extras.childSeat),
+      gps: String(form.extras.gps),
+      fullInsurance: String(form.extras.fullInsurance),
+      note: form.note || "",
+
+      // รถ
+      carId: String(car.id || ""),
+      carName: car.name || "",
+      carBrand: car.brand || "",
+      carType: car.type || "",
+      carYear: String(car.year || ""),
+      carTransmission: car.transmission || "",
+      carSeats: String(car.seats || ""),
+      carFuel: car.fuel || "",
+      pricePerDay: String(car.pricePerDay || 0),
+      companyName: car.company?.name || "",
+      companySlug: car.company?.slug || "",
+      carImage: car.image || "",
+
+      // ISO สำหรับ backend
+      pickup_at: new Date(form.pickupAt).toISOString(),
+      return_at: new Date(form.dropoffAt).toISOString(),
+
+      // ค่าจาก search เดิม
+      passengers: String(passengers || ""),
+      promo: promo || "",
+      ftype: ftype || "",
+      key: key || "",
+
+      // flag
+      isAdmin: String(isAdmin),
+    }).toString();
+
+    router.push(`/payment/choose?${qp}`);
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-900">
@@ -200,14 +328,14 @@ export default function BookingPage() {
 
       <main className="flex-grow">
         <div className="max-w-6xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-8">
-          {/* แถบสรุปเงื่อนไขที่ถูกส่งต่อมา */}
+          {/* Summary */}
           <div className="lg:col-span-2 -mt-2">
             <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm flex flex-wrap gap-x-6 gap-y-2">
               <span>
-                รับ: <b>{pickup_at_iso || form.pickupAt}</b>
+                รับ: <b>{pickupDisplay}</b>
               </span>
               <span>
-                คืน: <b>{return_at_iso || form.dropoffAt}</b>
+                คืน: <b>{returnDisplay}</b>
               </span>
               {passengers ? (
                 <span>
@@ -229,12 +357,14 @@ export default function BookingPage() {
                   key: <b>{key}</b>
                 </span>
               ) : null}
+              {isAdmin && (
+                <span className="text-green-700 font-semibold">(Admin)</span>
+              )}
             </div>
           </div>
 
-          {/* ซ้าย: ฟอร์มจอง */}
+          {/* ซ้าย: ฟอร์ม */}
           <section className={`${cardCls} p-6 md:p-8`}>
-            {/* Header รถ */}
             <div className="flex items-start gap-4">
               <div className="relative w-28 h-20 rounded-lg overflow-hidden border border-slate-200 shadow-sm">
                 <Image
@@ -243,17 +373,20 @@ export default function BookingPage() {
                   fill
                   className="object-cover"
                   sizes="112px"
-                  // ถ้าโดเมนรูปยังไม่ถูก allow ใน next.config ให้เปิดบรรทัดนี้ชั่วคราว
-                  // unoptimized
                 />
               </div>
               <div className="min-w-0">
                 <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-                  {car.name}
+                  {car.name}{" "}
+                  {isAdmin && (
+                    <span className="text-xs align-middle ml-2 px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                      Admin
+                    </span>
+                  )}
                 </h1>
                 <p className="text-sm md:text-base text-slate-700">
                   {car.brand} {car.brand && car.type ? "•" : ""} {car.type}
-                  {car.year ? ` • ${car.year}` : ""}
+                  {car.year ? ` • ${car.year}` : ""}{" "}
                   {car.transmission ? ` • ${car.transmission}` : ""}
                 </p>
                 <p className="mt-1 text-sm">
@@ -307,6 +440,7 @@ export default function BookingPage() {
                     min={minDateTime}
                     className={inputCls}
                     required
+                    autoComplete="off"
                   />
                 </div>
                 <div className="space-y-2">
@@ -316,9 +450,10 @@ export default function BookingPage() {
                     name="dropoffAt"
                     value={form.dropoffAt}
                     onChange={handleChange}
-                    min={form.pickupAt}
+                    min={form.pickupAt || minDateTime}
                     className={inputCls}
                     required
+                    autoComplete="off"
                   />
                 </div>
               </div>
@@ -329,22 +464,24 @@ export default function BookingPage() {
                   <label className={labelCls}>ชื่อ–นามสกุล</label>
                   <input
                     name="name"
-                    value={form.name}
+                    value={form.name || ""}
                     onChange={handleChange}
                     className={inputCls}
                     placeholder="ชื่อผู้จอง"
                     required
+                    autoComplete="name"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className={labelCls}>เบอร์โทร</label>
                   <input
                     name="phone"
-                    value={form.phone}
+                    value={form.phone || ""}
                     onChange={handleChange}
                     className={inputCls}
                     placeholder="080-000-0000"
                     required
+                    autoComplete="tel"
                   />
                 </div>
                 <div className="space-y-2">
@@ -352,10 +489,11 @@ export default function BookingPage() {
                   <input
                     type="email"
                     name="email"
-                    value={form.email}
+                    value={form.email || ""}
                     onChange={handleChange}
                     className={inputCls}
                     placeholder="you@example.com"
+                    autoComplete="email"
                   />
                 </div>
               </div>
@@ -402,7 +540,7 @@ export default function BookingPage() {
                 <label className={labelCls}>หมายเหตุเพิ่มเติม</label>
                 <textarea
                   name="note"
-                  value={form.note}
+                  value={form.note || ""}
                   onChange={handleChange}
                   rows={4}
                   className={inputCls}
@@ -423,46 +561,7 @@ export default function BookingPage() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    const qp = new URLSearchParams({
-                      // เวอร์ชัน camelCase
-                      pickupAt: form.pickupAt,
-                      dropoffAt: form.dropoffAt,
-                      pickupLocation: form.pickupLocation,
-                      dropoffLocation: form.dropoffLocation,
-                      name: form.name,
-                      phone: form.phone,
-                      email: form.email,
-                      childSeat: String(form.extras.childSeat),
-                      gps: String(form.extras.gps),
-                      fullInsurance: String(form.extras.fullInsurance),
-                      note: form.note,
-
-                      // ส่งต่อข้อมูลรถทั้งหมดที่มี (จาก query เดิม + fallback)
-                      carId: String(car.id),
-                      carName: car.name,
-                      carBrand: car.brand,
-                      carType: car.type,
-                      carYear: String(car.year || ""),
-                      carTransmission: car.transmission || "",
-                      carSeats: String(car.seats || ""),
-                      carFuel: car.fuel || "",
-                      pricePerDay: String(car.pricePerDay || 0),
-                      companyName: car.company?.name || "",
-                      companySlug: car.company?.slug || "",
-                      carImage: car.image || "",
-
-                      // เผื่อฝั่งถัดไปอยากใช้แบบ ISO
-                      pickup_at: new Date(form.pickupAt).toISOString(),
-                      return_at: new Date(form.dropoffAt).toISOString(),
-                      passengers: String(passengers || ""),
-                      promo: promo || "",
-                      ftype: ftype || "",
-                      key: key || "",
-                    }).toString();
-
-                    window.location.href = `/payment/choose?${qp}`;
-                  }}
+                  onClick={goToPayment}
                   className="px-5 py-2.5 rounded-lg bg-black text-white font-semibold hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black text-center"
                 >
                   ไปหน้า Choose payment →
@@ -471,7 +570,7 @@ export default function BookingPage() {
             </div>
           </section>
 
-          {/* ขวา: สรุปรายการ */}
+          {/* ขวา: สรุป */}
           <aside className={`${cardCls} p-6 md:p-8 h-fit`}>
             <h3 className="text-lg font-bold">สรุปรายการจอง</h3>
             <div className="mt-4 text-sm space-y-2">

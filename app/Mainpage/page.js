@@ -1,7 +1,6 @@
 "use client";
 
 import Footer from "@/Components/Footer";
-// กันชนชื่อกับ Web Headers
 import HeaderBar from "@/Components/Header";
 import BookingBox from "@/Components/bookingbox";
 import { useRouter } from "next/navigation";
@@ -9,11 +8,24 @@ import { useRouter } from "next/navigation";
 export default function Home() {
   const router = useRouter();
 
+  const toLocalInput = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    const y = d.getFullYear();
+    const m = pad(d.getMonth() + 1);
+    const day = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mm = pad(d.getMinutes());
+    return `${y}-${m}-${day}T${hh}:${mm}`;
+  };
+
   const handleSearch = (data) => {
-    // สร้าง query string จาก payload ที่ได้จาก BookingBox
     const params = new URLSearchParams();
 
-    const fields = [
+    // 1) snake_case (ฝั่ง API/ERP ใช้)
+    const snake = [
       "pickup_at",
       "return_at",
       "passengers",
@@ -21,16 +33,35 @@ export default function Home() {
       "ftype",
       "pickup_location",
       "dropoff_location",
+      "return_same",
     ];
-
-    fields.forEach((k) => {
+    snake.forEach((k) => {
       const v = data?.[k];
       if (v !== undefined && v !== null && String(v).trim() !== "") {
         params.set(k, String(v));
       }
     });
 
-    // เผื่อไว้: ถ้า BookingBox รุ่นเก่ายังส่ง pickupDate/pickupTime ... มาด้วย ก็พกไปด้วย
+    // 2) camelCase (ให้หน้า UI ถัดไป/booking พรีฟิล)
+    const camelPairs = [
+      ["pickup_location", "pickupLocation"],
+      ["dropoff_location", "dropoffLocation"],
+      ["return_same", "returnSame"],
+    ];
+    camelPairs.forEach(([from, to]) => {
+      const v = data?.[from];
+      if (v !== undefined && v !== null && String(v).trim() !== "") {
+        params.set(to, String(v));
+      }
+    });
+
+    // 3) แนบเวลารูปแบบที่ <input type="datetime-local"> ใช้ได้
+    const pickupAtLocal = toLocalInput(data?.pickup_at);
+    const returnAtLocal = toLocalInput(data?.return_at);
+    if (pickupAtLocal) params.set("pickupAt", pickupAtLocal);
+    if (returnAtLocal) params.set("dropoffAt", returnAtLocal);
+
+    // 4) เผื่อ UI รุ่นเก่าเก็บค่าดิบ
     ["pickupDate", "pickupTime", "returnDate", "returnTime", "carType"].forEach(
       (k) => {
         const v = data?._raw?.[k] ?? data?.[k];
@@ -40,6 +71,7 @@ export default function Home() {
       }
     );
 
+    // ไปหน้าเลือกคันก่อน (CarBox). ค่าใน params จะถูกพกต่อไปยัง /cars/[id] และ /booking
     router.push(`/carbox?${params.toString()}`);
   };
 
@@ -49,7 +81,6 @@ export default function Home() {
       <main className="flex-grow bg-white">
         <div className="min-h-screen bg-gray-100 p-6">
           <div className="max-w-6xl mx-auto">
-            {/* แค่ส่ง onSearch -> ไปหน้าถัดไป */}
             <BookingBox onSearch={handleSearch} />
           </div>
         </div>

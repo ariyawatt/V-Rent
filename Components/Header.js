@@ -4,34 +4,85 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+const ERP_BASE = (
+  process.env.NEXT_PUBLIC_ERP_BASE || "https://demo.erpeazy.com"
+).replace(/\/+$/, "");
+
 export default function Header() {
   const router = useRouter();
-  const [userId, setUserId] = useState(""); // ค่าที่เก็บตอนล็อกอิน เช่นอีเมลหรือ user id
-  const [displayName, setDisplayName] = useState(""); // ชื่อที่จะโชว์ (full name)
+  const [userId, setUserId] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [signingOut, setSigningOut] = useState(false);
 
-  const computeDisplayName = () => {
+  const computeFromStorage = () => {
     const uid = localStorage.getItem("vrent_user_id") || "";
-    // รองรับหลาย key ที่อาจใช้เก็บชื่อ
     const nameFromStorage =
       localStorage.getItem("vrent_full_name") ||
       localStorage.getItem("vrent_user_name") ||
       "";
-
-    // ถ้าไม่มีชื่อ ให้ fallback เป็นหน้าก่อน @ ของอีเมล หรือ uid ตรงๆ
     const fallback = uid && uid.includes("@") ? uid.split("@")[0] : uid;
-
     return { uid, name: nameFromStorage || fallback };
   };
 
+  async function hydrateFromERP() {
+    try {
+      const r = await fetch(
+        `${ERP_BASE}/api/method/erpnext.api.get_user_information`,
+        {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        }
+      );
+      if (!r.ok) return;
+
+      const data = await r.json();
+      const msg = data?.message ?? data ?? {};
+
+      const first = msg.first_name || msg.given_name || "";
+      const last = msg.last_name || msg.surname || "";
+      const fullName =
+        first || last
+          ? [first, last].filter(Boolean).join(" ")
+          : msg.full_name || msg.fullname || msg.name || "";
+
+      const email = msg.email || msg.user || msg.user_id || msg.username || "";
+
+      // <<< แก้ตรงนี้: ไม่มี type annotation แล้ว >>>
+      const rolesRaw = msg.roles || [];
+      const roles = Array.isArray(rolesRaw)
+        ? rolesRaw
+            .map((r) => (typeof r === "string" ? r : r && r.role))
+            .filter(Boolean)
+        : [];
+
+      const isAdmin =
+        String(msg.user_id || msg.user || "").toLowerCase() ===
+          "administrator" ||
+        roles.some((r) => /^(Administrator|System Manager)$/i.test(String(r)));
+
+      if (email) localStorage.setItem("vrent_user_id", email);
+      if (fullName) localStorage.setItem("vrent_full_name", fullName);
+      localStorage.setItem("vrent_is_admin", String(isAdmin));
+
+      const { uid, name } = computeFromStorage();
+      setUserId(uid);
+      setDisplayName(name);
+    } catch {
+      // ไม่มี session ก็ปล่อยผ่าน
+    }
+  }
+
   useEffect(() => {
-    const { uid, name } = computeDisplayName();
+    const { uid, name } = computeFromStorage();
     setUserId(uid);
     setDisplayName(name);
 
-    // sync ข้ามแท็บ
+    hydrateFromERP();
+
     const onStorage = () => {
-      const { uid: nextUid, name: nextName } = computeDisplayName();
+      const { uid: nextUid, name: nextName } = computeFromStorage();
       setUserId(nextUid);
       setDisplayName(nextName);
     };
@@ -43,19 +94,19 @@ export default function Header() {
     if (signingOut) return;
     setSigningOut(true);
     try {
-      await fetch("https://demo.erpeazy.com/api/method/logout", {
+      await fetch(`${ERP_BASE}/api/method/logout`, {
         method: "GET",
         credentials: "include",
       });
     } catch (err) {
       console.error("logout error:", err);
     } finally {
-      // เคลียร์ค่าที่เกี่ยวกับผู้ใช้ทั้งหมด
       localStorage.removeItem("vrent_user_id");
       localStorage.removeItem("vrent_full_name");
       localStorage.removeItem("vrent_user_name");
       localStorage.removeItem("vrent_is_admin");
       localStorage.removeItem("vrent_login_email");
+      localStorage.removeItem("vrent_phone");
       localStorage.removeItem("vrent_remember");
 
       setUserId("");
@@ -67,12 +118,10 @@ export default function Header() {
 
   return (
     <header className="w-full bg-black text-white px-6 py-4 flex items-center justify-between shadow-md">
-      {/* ซ้าย */}
       <div className="text-2xl font-bold">
         <Link href="/mainpage">V-Rent</Link>
       </div>
 
-      {/* ขวา */}
       <div className="flex items-center space-x-3">
         {userId ? (
           <>

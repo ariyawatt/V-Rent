@@ -7,38 +7,149 @@ import Headers from "@/Components/Header";
 import Footer from "@/Components/Footer";
 import { getCarById } from "@/data/cars";
 
-const getBool = (v) => String(v).toLowerCase() === "true";
-const f = (n) => Number(n || 0).toLocaleString();
+/* ---------- helpers ---------- */
+const getBool = (v) => String(v ?? "").toLowerCase() === "true";
+const fmt = (n) => Number(n || 0).toLocaleString();
+const pick = (sp, k, fb = "") => sp.get(k) ?? fb;
 
-export default function ChoosePayment() {
-  // ✅ ใช้ hook ของ Next.js 15
-  const sp = useSearchParams();
+// เลือกวันที่แบบปลอดภัย: ให้ความสำคัญกับ ISO ก่อน (pickup_at/return_at)
+// ตกมาใช้ pickupAt/dropoffAt (local input) ถ้าไม่มี
+function chooseDateStrings(sp) {
+  const isoPick = pick(sp, "pickup_at", "");
+  const isoDrop = pick(sp, "return_at", "");
+  const localPick = pick(sp, "pickupAt", "");
+  const localDrop = pick(sp, "dropoffAt", "");
 
-  const carId = sp.get("carId") || "";
-  const car = useMemo(() => getCarById(String(carId)), [carId]);
-
-  const pickupLocation = sp.get("pickupLocation") || "";
-  const dropoffLocation = sp.get("dropoffLocation") || "";
-  const pickupAt = sp.get("pickupAt") || "";
-  const dropoffAt = sp.get("dropoffAt") || "";
-  const name = sp.get("name") || "";
-  const phone = sp.get("phone") || "";
-  const email = sp.get("email") || "";
-  const note = sp.get("note") || "";
-
-  const extras = {
-    childSeat: getBool(sp.get("childSeat")),
-    gps: getBool(sp.get("gps")),
-    fullInsurance: getBool(sp.get("fullInsurance")),
+  // แสดงใน UI: โชว์ local ถ้ามี, ไม่งั้น format จาก ISO → local
+  const toLocal = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+      d.getDate()
+    )}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
+  return {
+    // ใช้สำหรับแสดง
+    displayPick: localPick || toLocal(isoPick),
+    displayDrop: localDrop || toLocal(isoDrop),
+    // ใช้สำหรับคำนวณ
+    calcPick: isoPick || localPick || "",
+    calcDrop: isoDrop || localDrop || "",
+  };
+}
+
+export default function ChoosePayment() {
+  const sp = useSearchParams();
+
+  /* ---------- รับพารามิเตอร์ทั้งหมด ---------- */
+  // รถ + บริษัท + ราคา
+  const carId = pick(sp, "carId");
+  const carName = pick(sp, "carName");
+  const carBrand = pick(sp, "carBrand");
+  const carType = pick(sp, "carType");
+  const carYear = pick(sp, "carYear");
+  const carTransmission = pick(sp, "carTransmission");
+  const carSeats = pick(sp, "carSeats");
+  const carFuel = pick(sp, "carFuel");
+  const pricePerDay = Number(pick(sp, "pricePerDay") || 0);
+  const companyName = pick(sp, "companyName");
+  const companySlug = pick(sp, "companySlug");
+  const carImage = pick(sp, "carImage");
+
+  // สถานที่/เวลา/ผู้ติดต่อ
+  const pickupLocation = pick(sp, "pickupLocation");
+  const dropoffLocation = pick(sp, "dropoffLocation");
+  const { displayPick, displayDrop, calcPick, calcDrop } =
+    chooseDateStrings(sp);
+  const name = pick(sp, "name");
+  const phone = pick(sp, "phone");
+  const email = pick(sp, "email");
+  const note = pick(sp, "note");
+
+  // ตัวเลือกเสริม
+  const extras = {
+    childSeat: getBool(pick(sp, "childSeat")),
+    gps: getBool(pick(sp, "gps")),
+    fullInsurance: getBool(pick(sp, "fullInsurance")),
+  };
+
+  // flags อื่นๆจากหน้าแรก
+  const passengers = pick(sp, "passengers");
+  const promo = pick(sp, "promo");
+  const ftype = pick(sp, "ftype");
+  const key = pick(sp, "key");
+  const isAdmin = getBool(pick(sp, "isAdmin"));
+
+  // ถ้าข้อมูลรถใน query ไม่ครบ ลอง fallback จาก data/cars
+  const carFallback = useMemo(() => getCarById(String(carId || "")), [carId]);
+  const car = useMemo(() => {
+    const fromQueryHasCar =
+      carName || carBrand || carType || pricePerDay || carImage || companyName;
+    if (fromQueryHasCar) {
+      return {
+        id: carId,
+        name: carName || carFallback?.name || "Vehicle",
+        brand: carBrand || carFallback?.brand || "",
+        type: carType || carFallback?.type || "",
+        year: carYear || carFallback?.year || "",
+        transmission: carTransmission || carFallback?.transmission || "",
+        seats: carSeats || carFallback?.seats || "",
+        fuel: carFuel || carFallback?.fuel || "",
+        pricePerDay: Number(pricePerDay || carFallback?.pricePerDay || 0),
+        company: {
+          name: companyName || carFallback?.company?.name || "V-Rent Partner",
+          slug:
+            companySlug ||
+            carFallback?.company?.slug ||
+            (companyName || "partner").toLowerCase().replace(/\s+/g, "-"),
+        },
+        image: carImage || carFallback?.image || "/noimage.jpg",
+        description: carFallback?.description || "",
+      };
+    }
+    return (
+      carFallback || {
+        id: carId,
+        name: "Vehicle",
+        brand: "",
+        type: "",
+        year: "",
+        transmission: "",
+        seats: "",
+        fuel: "",
+        pricePerDay: 0,
+        company: { name: "V-Rent Partner", slug: "partner" },
+        image: "/noimage.jpg",
+        description: "",
+      }
+    );
+  }, [
+    carId,
+    carName,
+    carBrand,
+    carType,
+    carYear,
+    carTransmission,
+    carSeats,
+    carFuel,
+    pricePerDay,
+    companyName,
+    companySlug,
+    carImage,
+    carFallback,
+  ]);
+
+  /* ---------- คำนวณราคา/จำนวนวัน ---------- */
   const dayCount = useMemo(() => {
-    if (!pickupAt || !dropoffAt) return 1;
-    const A = new Date(pickupAt);
-    const B = new Date(dropoffAt);
-    const diff = Math.ceil((B - A) / (1000 * 60 * 60 * 24));
+    if (!calcPick || !calcDrop) return 1;
+    const A = new Date(calcPick);
+    const B = new Date(calcDrop);
+    const diff = Math.ceil((B.getTime() - A.getTime()) / (1000 * 60 * 60 * 24));
     return Math.max(diff, 1);
-  }, [pickupAt, dropoffAt]);
+  }, [calcPick, calcDrop]);
 
   const base = (car?.pricePerDay || 0) * dayCount;
   const extrasSum =
@@ -55,11 +166,28 @@ export default function ChoosePayment() {
     cvc: "",
   });
 
-  // ✅ เก็บ query ทั้งชุดไว้ส่งกลับ/ต่อไป
+  // เก็บ query ทั้งชุดไว้ส่งกลับ/ต่อไป
   const tailQS = useMemo(() => {
     const qs = sp.toString();
     return qs ? `?${qs}` : "";
   }, [sp]);
+
+  // สร้างอ็อบเจ็กต์สำหรับ Debug panel (ดูว่ามีอะไรส่งมาบ้าง)
+  const debugAllParams = useMemo(() => {
+    const o = {};
+    for (const [k, v] of sp.entries()) o[k] = v;
+    // เพิ่มที่คำนวณ/สรุปเพื่อสะดวกเวลาเทส
+    o.__derived__ = {
+      dayCount,
+      base,
+      extrasSum,
+      total,
+      displayPick,
+      displayDrop,
+      isAdmin,
+    };
+    return o;
+  }, [sp, dayCount, base, extrasSum, total, displayPick, displayDrop, isAdmin]);
 
   return (
     <div className="flex flex-col min-h-screen bg-white text-slate-900">
@@ -137,15 +265,21 @@ export default function ChoosePayment() {
                   </p>
 
                   <div className="mt-5 flex flex-col sm:flex-row items-center gap-6">
-                    <div className="h-44 w-44 rounded-lg border-2 border-dashed border-slate-500/80 grid place-items-center text-slate-700">
-                      QR MOCK
+                    <div className="h-44 w-44 rounded-lg border border-slate-300 grid place-items-center overflow-hidden bg-white">
+                      <img
+                        src="https://commons.wikimedia.org/wiki/Special:FilePath/Rickrolling_QR_code.png"
+                        alt="PromptPay QR"
+                        className="h-44 w-44 object-contain"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                      />
                     </div>
                     <div className="flex-1 w-full">
                       <div className="text-sm text-slate-700">
                         ยอดที่ต้องชำระ
                       </div>
                       <div className="text-4xl font-extrabold tracking-tight text-slate-900">
-                        ฿{f(total)}
+                        ฿{fmt(total)}
                       </div>
 
                       <div className="mt-4">
@@ -242,7 +376,7 @@ export default function ChoosePayment() {
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
                 <Link
-                  href={`/booking/${carId}${tailQS}`}
+                  href={`/booking/${encodeURIComponent(carId || "")}${tailQS}`}
                   className="px-4 py-2 rounded-lg border border-slate-400 bg-white hover:bg-slate-50 text-center"
                 >
                   กลับไปแก้ไขข้อมูลการจอง
@@ -255,6 +389,16 @@ export default function ChoosePayment() {
                   ดำเนินการชำระเงิน
                 </button>
               </div>
+
+              {/* Debug panel: กดเพื่อดูพารามิเตอร์ทั้งหมด */}
+              {/* <details className="mt-6 rounded-lg border border-slate-300 p-4 bg-slate-50">
+                <summary className="cursor-pointer font-semibold text-slate-900">
+                  Debug: ข้อมูลที่ส่งมาหน้านี้ทั้งหมด
+                </summary>
+                <pre className="mt-3 text-xs overflow-auto whitespace-pre-wrap">
+                  {JSON.stringify(debugAllParams, null, 2)}
+                </pre>
+              </details> */}
             </div>
           </section>
 
@@ -267,11 +411,17 @@ export default function ChoosePayment() {
                 <span className="font-medium">{car?.name || "-"}</span>
               </div>
               <div className="flex justify-between">
+                <span>ผู้ให้บริการ</span>
+                <span className="font-medium">
+                  {car?.company?.name || companyName || "-"}
+                </span>
+              </div>
+              <div className="flex justify-between">
                 <span>รับรถ</span>
                 <span className="text-right">
                   {pickupLocation || "-"}
                   <br className="hidden sm:block" />
-                  <span className="text-slate-700">{pickupAt || "-"}</span>
+                  <span className="text-slate-700">{displayPick || "-"}</span>
                 </span>
               </div>
               <div className="flex justify-between">
@@ -279,7 +429,7 @@ export default function ChoosePayment() {
                 <span className="text-right">
                   {dropoffLocation || "-"}
                   <br className="hidden sm:block" />
-                  <span className="text-slate-700">{dropoffAt || "-"}</span>
+                  <span className="text-slate-700">{displayDrop || "-"}</span>
                 </span>
               </div>
               <div className="flex justify-between">
@@ -299,15 +449,15 @@ export default function ChoosePayment() {
 
               <div className="flex justify-between">
                 <span>ราคารถ (x{dayCount})</span>
-                <span>฿{f(base)}</span>
+                <span>฿{fmt(base)}</span>
               </div>
               <div className="flex justify-between">
                 <span>ตัวเลือกเสริม</span>
-                <span>฿{f(extrasSum)}</span>
+                <span>฿{fmt(extrasSum)}</span>
               </div>
               <div className="flex justify-between text-lg font-extrabold mt-2">
                 <span>รวมทั้งหมด</span>
-                <span>฿{f(total)}</span>
+                <span>฿{fmt(total)}</span>
               </div>
 
               <hr className="my-2 border-slate-300" />
@@ -315,6 +465,20 @@ export default function ChoosePayment() {
               <div className="text-xs text-slate-800">
                 หมายเหตุ: {note || "-"}
               </div>
+
+              {isAdmin ? (
+                <div className="mt-2 text-xs font-semibold text-green-700">
+                  (Admin mode)
+                </div>
+              ) : null}
+              {passengers || promo || ftype || key ? (
+                <div className="mt-2 text-xs text-slate-700 space-y-1">
+                  {passengers ? <div>ผู้โดยสาร: {passengers}</div> : null}
+                  {ftype ? <div>ประเภทรถ: {ftype}</div> : null}
+                  {promo ? <div>โค้ดส่วนลด: {promo}</div> : null}
+                  {key ? <div>key: {key}</div> : null}
+                </div>
+              ) : null}
             </div>
           </aside>
         </div>

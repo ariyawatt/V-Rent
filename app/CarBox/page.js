@@ -118,6 +118,19 @@ export default function CarBox() {
                   });
                   q.set("key", String(rawKey));
 
+                  const pickupLoc =
+                    search.get("pickupLocation") ||
+                    search.get("pickup_location");
+                  const dropoffLoc =
+                    search.get("dropoffLocation") ||
+                    search.get("dropoff_location");
+                  const returnSame =
+                    search.get("returnSame") ?? search.get("return_same");
+                  if (pickupLoc) q.set("pickupLocation", pickupLoc);
+                  if (dropoffLoc) q.set("dropoffLocation", dropoffLoc);
+                  if (returnSame != null)
+                    q.set("returnSame", String(returnSame));
+
                   const href = `/cars/${slugify(rawKey)}?${q.toString()}`;
 
                   const img = normalizeImage(car.vehicle_image || car.image);
