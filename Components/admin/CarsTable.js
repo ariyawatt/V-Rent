@@ -11,7 +11,6 @@ const ERP_DELETE_URL =
   "https://demo.erpeazy.com/api/method/erpnext.api.delete_vehicle";
 const ERP_EDIT_URL =
   "https://demo.erpeazy.com/api/method/erpnext.api.edit_vehicles";
-// ถ้าต้องยิงด้วย Token ให้เปิดบรรทัดนี้
 // const ERP_AUTH = "token xxx:yyy";
 
 export default function CarsTable({
@@ -34,16 +33,20 @@ export default function CarsTable({
   const [delOpen, setDelOpen] = useState(false);
   const [editForm, setEditForm] = useState(initCar());
   const [selectedId, setSelectedId] = useState(null);
-  const [selectedPlate, setSelectedPlate] = useState(""); // ใช้กับลบ ERP
-  const [selectedName, setSelectedName] = useState(""); // แสดงชื่อใน modal
+  const [selectedPlate, setSelectedPlate] = useState("");
+  const [selectedName, setSelectedName] = useState("");
   const [imgError, setImgError] = useState("");
   const [saving, setSaving] = useState(false);
   const editImgRef = useRef(null);
 
+  // ───────── Filter state ─────────
+  const [filterQ, setFilterQ] = useState(""); // ค้นหา
+  const [filterStatus, setFilterStatus] = useState("ทั้งหมด"); // สถานะ
+
   // sync external cars
   useEffect(() => setRows(cars), [cars]);
 
-  // auto-fetch list (เมื่อ parent ไม่ส่ง cars มา)
+  // auto-fetch list
   useEffect(() => {
     if (!autoFetchIfEmpty) return;
     if (Array.isArray(cars) && cars.length > 0) return;
@@ -83,7 +86,7 @@ export default function CarsTable({
 
     setEditForm({
       id: car?.id ?? "",
-      vid: car?.vid || car?.id || "", // เผื่อกรณีระบบคุณใช้ vid
+      vid: car?.vid || car?.id || "",
       name: car?.name ?? "",
       brand: car?.brand ?? "",
       type: car?.type ?? "Sedan",
@@ -94,10 +97,10 @@ export default function CarsTable({
       year: String(car?.year ?? ""),
       pricePerDay: String(car?.pricePerDay ?? 0),
       status: car?.status ?? "ว่าง",
-      company: car?.company || "", // ถ้าระบบมีบริษัทแนบมาด้วย
+      company: car?.company || "",
       description: car?.description ?? "",
       imageData: car?.imageData || car?.imageUrl || "",
-      imageRemoved: false, // flag ลบรูป
+      imageRemoved: false,
     });
     setEditOpen(true);
   };
@@ -126,8 +129,8 @@ export default function CarsTable({
     reader.onload = () =>
       setEditForm((p) => ({
         ...p,
-        imageData: String(reader.result), // แสดง preview
-        imageRemoved: false, // มีรูปใหม่แล้ว ไม่ใช่การลบ
+        imageData: String(reader.result),
+        imageRemoved: false,
       }));
     reader.onerror = () => {
       setImgError("อ่านไฟล์ไม่สำเร็จ");
@@ -137,7 +140,6 @@ export default function CarsTable({
   };
 
   const clearEditImage = () => {
-    // ลบรูปเก่า (ให้ backend ลบจริงด้วย flag)
     setEditForm((p) => ({ ...p, imageData: "", imageRemoved: true }));
     setImgError("");
     if (editImgRef.current) editImgRef.current.value = "";
@@ -150,14 +152,11 @@ export default function CarsTable({
     setSaving(true);
     try {
       const fd = new FormData();
-
-      // ==== map fields ให้ตรง API ====
       fd.append("license_plate", editForm.licensePlate || "");
       fd.append("vehicle_name", editForm.name || "");
       fd.append("status", editForm.status || "");
       fd.append("price", String(editForm.pricePerDay || 0));
       fd.append("company", editForm.company || "");
-      // มีทั้ง "type" และ "v_type" ในตัวอย่าง API — ส่งทั้งคู่ให้ชัวร์
       fd.append("type", editForm.type || "");
       fd.append("v_type", editForm.type || "");
       fd.append("brand", editForm.brand || "");
@@ -168,26 +167,16 @@ export default function CarsTable({
       fd.append("description", editForm.description || "");
       fd.append("vid", editForm.vid || editForm.id || selectedId || "");
 
-      // ==== รูปเดียวต่อคัน: แนวทาง ====
-      // 1) ถ้ามีไฟล์ใหม่ -> ส่ง "file"
       const newFile = editImgRef.current?.files?.[0];
-      if (newFile) {
-        fd.append("file", newFile, newFile.name);
-      }
-      // 2) ถ้ากดลบรูป -> ส่ง flag ให้ backend รู้ (ชื่อคีย์ "delete_image" สมมติทั่วไป)
-      //    ถ้า backend ของคุณใช้คีย์ชื่ออื่น ให้แก้ตามนั้น
-      if (editForm.imageRemoved && !newFile) {
-        fd.append("delete_image", "1");
-      }
-      // หมายเหตุ: ถ้าไม่ลบและไม่อัปโหลดใหม่ จะไม่แตะรูปเดิม
+      if (newFile) fd.append("file", newFile, newFile.name);
+      if (editForm.imageRemoved && !newFile) fd.append("delete_image", "1");
 
       const headers = new Headers();
-      // ถ้าต้องใช้ token:
       // headers.set("Authorization", ERP_AUTH);
 
       const res = await fetch(ERP_EDIT_URL, {
         method: "POST",
-        headers, // ห้าม set Content-Type เองเมื่อใช้ FormData
+        headers,
         body: fd,
         credentials: "include",
         redirect: "follow",
@@ -198,8 +187,6 @@ export default function CarsTable({
         throw new Error(`Save failed (${res.status}) ${txt}`.trim());
       }
 
-      // ===== อัปเดต UI ทันที =====
-      // สร้างรูป preview ใหม่ถ้าอัปโหลดไฟล์
       const nextImageData = newFile
         ? URL.createObjectURL(newFile)
         : editForm.imageRemoved
@@ -258,7 +245,6 @@ export default function CarsTable({
 
       const erpHeaders = new Headers();
       erpHeaders.set("Content-Type", "application/json");
-      // ถ้าต้องใช้ token:
       // erpHeaders.set("Authorization", ERP_AUTH);
 
       const payload = { license_plate: selectedPlate };
@@ -291,14 +277,40 @@ export default function CarsTable({
     }
   };
 
-  // สำหรับ column runnum
+  // ───────── Filtered rows (apply ค้นหา + สถานะ) ─────────
+  const filteredRows = useMemo(() => {
+    const q = filterQ.trim().toLowerCase();
+    return rows.filter((c) => {
+      const matchStatus =
+        filterStatus === "ทั้งหมด"
+          ? true
+          : (c.status || "ว่าง") === filterStatus;
+      if (!matchStatus) return false;
+
+      if (!q) return true;
+
+      const keys = [c.name, c.brand, c.licensePlate, c.type]
+        .filter(Boolean)
+        .map((v) => String(v).toLowerCase());
+
+      return keys.some((v) => v.includes(q));
+    });
+  }, [rows, filterQ, filterStatus]);
+
+  // สำหรับ column runnum → ใช้ filteredRows
   const dataForRender = useMemo(
-    () => rows.map((c, i) => ({ ...c, _idx: i })),
-    [rows]
+    () => filteredRows.map((c, i) => ({ ...c, _idx: i })),
+    [filteredRows]
   );
+
+  const clearFilters = () => {
+    setFilterQ("");
+    setFilterStatus("ทั้งหมด");
+  };
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-black">ตารางรถ</h2>
         <div className="text-sm text-black">
@@ -306,12 +318,46 @@ export default function CarsTable({
         </div>
       </div>
 
+      {/* Error */}
       {!!error && (
         <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
           {error}
         </div>
       )}
 
+      {/* ───────── Filter Bar ───────── */}
+      <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-2">
+          <input
+            value={filterQ}
+            onChange={(e) => setFilterQ(e.target.value)}
+            placeholder="รุ่น / ยี่ห้อ / ป้ายทะเบียน..."
+            className="w-64 rounded-lg border border-gray-300 px-3 py-2 text-sm text-black placeholder:text-gray-400 focus:border-gray-700 focus:ring-gray-700"
+          />
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-black focus:border-gray-700 focus:ring-gray-700"
+          >
+            <option>ทั้งหมด</option>
+            <option>ว่าง</option>
+            <option>ถูกยืมอยู่</option>
+            <option>ซ่อมแซม</option>
+          </select>
+          <button
+            onClick={clearFilters}
+            className="rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-sm text-black hover:bg-gray-200"
+          >
+            ล้างตัวกรอง
+          </button>
+        </div>
+
+        <div className="text-sm text-black">
+          แสดง {filteredRows.length} จาก {rows.length} รายการ
+        </div>
+      </div>
+
+      {/* Table */}
       <div className="overflow-x-auto mt-4">
         <table className="w-full min-w-full text-sm">
           <thead>
@@ -334,10 +380,10 @@ export default function CarsTable({
                   กำลังโหลดข้อมูล…
                 </td>
               </tr>
-            ) : rows.length === 0 ? (
+            ) : filteredRows.length === 0 ? (
               <tr>
                 <td colSpan={8} className="py-6 text-center">
-                  ไม่มีข้อมูลรถ
+                  ไม่พบข้อมูลตามตัวกรอง
                 </td>
               </tr>
             ) : (
@@ -389,7 +435,7 @@ export default function CarsTable({
                           ✎ แก้ไข
                         </button>
                         <button
-                          onClick={() => openDelete(c)} // ส่งทั้ง object
+                          onClick={() => openDelete(c)}
                           className="rounded-lg border border-gray-300 bg-gray-200 px-3 py-1.5 text-black hover:bg-gray-300"
                         >
                           ลบ
