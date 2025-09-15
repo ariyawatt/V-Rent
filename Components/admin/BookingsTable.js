@@ -35,20 +35,16 @@ function PayBadge({ value }) {
   const v = String(value || "")
     .toLowerCase()
     .trim();
-  if (v === "paid") {
-    return (
-      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800">
-        ชำระแล้ว
-      </span>
-    );
-  }
-  return (
+  return v === "paid" ? (
+    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800">
+      ชำระแล้ว
+    </span>
+  ) : (
     <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-700">
       –
     </span>
   );
 }
-
 function BookingBadge({ value }) {
   const v = String(value || "")
     .toLowerCase()
@@ -103,7 +99,6 @@ function normalizeRental(rec) {
     rec?.id ||
     rec?.code ||
     "-";
-
   const customerName =
     rec?.customer_name ||
     rec?.customer ||
@@ -170,6 +165,8 @@ function normalizeRental(rec) {
     pickupLocation: rec?.pickup_location || rec?.pickup_place || "",
     returnLocation: rec?.return_location || rec?.return_place || "",
     channel: rec?.contact_platform || rec?.source || "",
+    docType: rec?.id_document_type || "",
+    note: rec?.note || "",
   };
 }
 
@@ -198,7 +195,7 @@ function getLifecycle(row, now = new Date()) {
   return status || "confirmed";
 }
 
-/* สถานะที่เลือกได้ในตัวกรอง — เอา 'confirmed' ออก */
+/* ───────── options ───────── */
 const STATUS_OPTIONS = [
   { value: "", label: "ทั้งหมด" },
   { value: "waiting pickup", label: "รอรับ" },
@@ -208,24 +205,24 @@ const STATUS_OPTIONS = [
   { value: "cancelled", label: "ยกเลิก" },
   { value: "completed", label: "เสร็จสิ้น" },
 ];
+const DOC_TYPES = ["บัตรประชาชน", "หนังสือเดินทาง", "ใบขับขี่"];
 
-/* ───────── API mapping ───────── */
-// map ระหว่างค่าภายใน UI ↔ สตริงที่ API ฝั่ง Frappe รับ
+/* API mapping UI ↔ ERP strings */
 const UI_TO_API_STATUS = {
+  confirmed: "Confirmed",
   "waiting pickup": "Waiting Pickup",
   "pickup overdue": "Pickup Overdue",
   "in use": "In Use",
   "return overdue": "Return Overdue",
   cancelled: "Cancelled",
   completed: "Completed",
-  confirmed: "Confirmed",
 };
 const API_TO_UI_STATUS = Object.fromEntries(
   Object.entries(UI_TO_API_STATUS).map(([k, v]) => [v.toLowerCase(), k])
 );
 
 /* ───────── Edit Modal ───────── */
-function EditModal({ open, data, onClose, onSaved }) {
+function EditModal({ open, data, carOptions = [], onClose, onSaved }) {
   const [form, setForm] = useState(data || {});
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -244,14 +241,13 @@ function EditModal({ open, data, onClose, onSaved }) {
       setSaving(true);
       setErr("");
 
-      // ถ้าไม่ได้เปลี่ยนสถานะก็จะไม่ยิง API
       const uiStatus = String(form.bookingStatus || "")
         .toLowerCase()
         .trim();
       const apiStatus = UI_TO_API_STATUS[uiStatus];
       if (apiStatus && form.bookingCode) {
-        const myHeaders = new Headers();
-        myHeaders.append("Content-Type", "application/json");
+        const headers = new Headers();
+        headers.append("Content-Type", "application/json");
         const body = JSON.stringify({
           vid: form.bookingCode,
           status: apiStatus,
@@ -261,7 +257,7 @@ function EditModal({ open, data, onClose, onSaved }) {
           "https://demo.erpeazy.com/api/method/erpnext.api.edit_rentals_status",
           {
             method: "POST",
-            headers: myHeaders,
+            headers,
             body,
             redirect: "follow",
             credentials: "include",
@@ -269,20 +265,9 @@ function EditModal({ open, data, onClose, onSaved }) {
         );
         const text = await res.text();
         if (!res.ok) throw new Error(text || "เปลี่ยนสถานะไม่สำเร็จ");
-
-        // แปลงสถานะตอบกลับ (ถ้า API คืนข้อความสถานะ)
-        const lowerText = text.toLowerCase();
-        let normalizedStatus = uiStatus;
-        Object.entries(API_TO_UI_STATUS).forEach(([apiLower, ui]) => {
-          if (lowerText.includes(apiLower)) normalizedStatus = ui;
-        });
-
-        // แจ้งกลับให้ตารางอัปเดต
-        onSaved?.({ ...form, bookingStatus: normalizedStatus });
-      } else {
-        onSaved?.(form);
       }
 
+      onSaved?.(form);
       onClose?.();
     } catch (e) {
       setErr(String(e?.message || e));
@@ -291,9 +276,17 @@ function EditModal({ open, data, onClose, onSaved }) {
     }
   };
 
+  // ทำให้ตัวอักษรชัดเจนทุกช่อง
+  const inputCls =
+    "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 " +
+    "placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black " +
+    "disabled:bg-gray-100 disabled:text-gray-500";
+  const labelCls = "text-xs font-semibold text-black mb-1";
+
   return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-3xl rounded-xl bg-white shadow-xl">
+    <div className="fixed inset-0 z-[999] flex items-start justify-center bg-black/40 p-4">
+      <div className="w-full max-w-4xl rounded-xl bg-white shadow-xl">
+        {/* header */}
         <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
           <h3 className="text-lg font-bold text-black">แก้ไขการจอง</h3>
           <button
@@ -304,122 +297,181 @@ function EditModal({ open, data, onClose, onSaved }) {
           </button>
         </div>
 
+        {/* body */}
         <div className="p-5">
-          {/* แถว 1 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* รหัสจอง / เอกสารยืนยัน */}
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                รหัสจอง
-              </div>
+              <div className={labelCls}>รหัสจอง</div>
               <input
                 value={form.bookingCode || ""}
                 disabled
-                className="w-full rounded-lg border border-slate-300 bg-gray-50 px-3 py-2 text-sm"
+                className={inputCls}
               />
             </div>
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                เบอร์โทร
-              </div>
-              <input
-                value={form.customerPhone || ""}
-                onChange={(e) => set("customerPhone", e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <div className={labelCls}>เอกสารยืนยัน</div>
+              <select
+                value={form.docType || "บัตรประชาชน"}
+                onChange={(e) => set("docType", e.target.value)}
+                className={inputCls}
+              >
+                {DOC_TYPES.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            {/* ชื่อลูกค้า / เบอร์โทร */}
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                ชื่อลูกค้า
-              </div>
+              <div className={labelCls}>ชื่อลูกค้า</div>
               <input
                 value={form.customerName || ""}
                 onChange={(e) => set("customerName", e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className={inputCls}
+                placeholder="ชื่อลูกค้า"
               />
             </div>
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                รถ/ทะเบียน
-              </div>
+              <div className={labelCls}>เบอร์โทร</div>
               <input
-                value={`${form.carName || "—"} / ${form.carPlate || "—"}`}
-                onChange={() => {}}
-                disabled
-                className="w-full rounded-lg border border-slate-300 bg-gray-50 px-3 py-2 text-sm"
+                value={form.customerPhone || ""}
+                onChange={(e) => set("customerPhone", e.target.value)}
+                className={inputCls}
+                placeholder="เบอร์โทร"
               />
             </div>
 
+            {/* เลือกรถ / ราคา/วัน */}
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                วัน-เวลา รับรถ
-              </div>
-              <input
-                type="datetime-local"
-                value={(form.pickupTime || "").replace(" ", "T").slice(0, 16)}
-                onChange={(e) => set("pickupTime", e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <div className={labelCls}>เลือกรถ</div>
+              <select
+                value={`${form.carName || ""}|${form.carPlate || ""}|${
+                  form.pricePerDay ?? 0
+                }`}
+                onChange={(e) => {
+                  const [name, plate, price] = e.target.value.split("|");
+                  set("carName", name);
+                  set("carPlate", plate);
+                  set("pricePerDay", Number(price || 0));
+                }}
+                className={inputCls}
+              >
+                {(Array.isArray(carOptions) && carOptions.length
+                  ? carOptions
+                  : [
+                      {
+                        name: form.carName || "ไม่ระบุ",
+                        plate: form.carPlate || "",
+                        pricePerDay: form.pricePerDay ?? 0,
+                      },
+                    ]
+                ).map((c) => (
+                  <option
+                    key={`${c.name}|${c.plate}`}
+                    value={`${c.name}|${c.plate}|${c.pricePerDay ?? 0}`}
+                  >
+                    {`${c.name}${c.plate ? ` (${c.plate})` : ""} — ${fmtBaht(
+                      c.pricePerDay ?? 0
+                    )}฿/วัน`}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                วัน-เวลา คืนรถ
-              </div>
-              <input
-                type="datetime-local"
-                value={(form.returnTime || "").replace(" ", "T").slice(0, 16)}
-                onChange={(e) => set("returnTime", e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                ราคา/วัน (บาท)
-              </div>
+              <div className={labelCls}>ราคา/วัน (บาท)</div>
               <input
                 type="number"
                 value={form.pricePerDay ?? 0}
                 onChange={(e) =>
                   set("pricePerDay", Number(e.target.value || 0))
                 }
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className={inputCls}
+              />
+            </div>
+
+            {/* สถานที่รับ/คืน */}
+            <div>
+              <div className={labelCls}>สถานที่รับรถ</div>
+              <input
+                value={form.pickupLocation || ""}
+                onChange={(e) => set("pickupLocation", e.target.value)}
+                className={inputCls}
+                placeholder="สถานที่รับรถ"
               />
             </div>
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                ช่องทาง
-              </div>
+              <div className={labelCls}>สถานที่คืนรถ</div>
+              <input
+                value={form.returnLocation || ""}
+                onChange={(e) => set("returnLocation", e.target.value)}
+                className={inputCls}
+                placeholder="สถานที่คืนรถ"
+              />
+            </div>
+
+            {/* วัน-เวลา รับ/คืน */}
+            <div>
+              <div className={labelCls}>วัน-เวลา รับรถ</div>
+              <input
+                type="datetime-local"
+                value={(form.pickupTime || "").replace(" ", "T").slice(0, 16)}
+                onChange={(e) => set("pickupTime", e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <div className={labelCls}>วัน-เวลา คืนรถ</div>
+              <input
+                type="datetime-local"
+                value={(form.returnTime || "").replace(" ", "T").slice(0, 16)}
+                onChange={(e) => set("returnTime", e.target.value)}
+                className={inputCls}
+              />
+            </div>
+
+            {/* ส่วนลด / ช่องทาง */}
+            <div>
+              <div className={labelCls}>ส่วนลด (บาท)</div>
+              <input
+                type="number"
+                value={form.discount ?? 0}
+                onChange={(e) => set("discount", Number(e.target.value || 0))}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <div className={labelCls}>ช่องทาง</div>
               <input
                 value={form.channel || ""}
                 onChange={(e) => set("channel", e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className={inputCls}
+                placeholder="เช่น website, Line, walk-in"
               />
             </div>
 
+            {/* ชำระเงิน / สถานะการจอง */}
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                สถานะชำระเงิน
-              </div>
+              <div className={labelCls}>สถานะชำระเงิน</div>
               <select
                 value={form.paymentStatus || ""}
                 onChange={(e) => set("paymentStatus", e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className={inputCls}
               >
-                <option value="">รอชำระ / ไม่ระบุ</option>
                 <option value="paid">ชำระแล้ว</option>
               </select>
             </div>
-
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                สถานะการจอง
-              </div>
+              <div className={labelCls}>สถานะการจอง</div>
               <select
-                value={String(form.bookingStatus || "").toLowerCase()}
+                value={
+                  String(form.bookingStatus || "").toLowerCase() || "confirmed"
+                }
                 onChange={(e) => set("bookingStatus", e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className={inputCls}
               >
-                <option value="confirmed">ยืนยันแล้ว</option>
                 <option value="waiting pickup">รอรับ</option>
                 <option value="pickup overdue">เลยกำหนดรับ</option>
                 <option value="in use">กำลังเช่า</option>
@@ -427,6 +479,30 @@ function EditModal({ open, data, onClose, onSaved }) {
                 <option value="cancelled">ยกเลิก</option>
                 <option value="completed">เสร็จสิ้น</option>
               </select>
+            </div>
+
+            {/* หมายเหตุ */}
+            <div className="md:col-span-2">
+              <div className={labelCls}>หมายเหตุ</div>
+              <textarea
+                rows={4}
+                value={form.note || ""}
+                onChange={(e) => set("note", e.target.value)}
+                className={inputCls}
+                placeholder="รายละเอียดเพิ่มเติม"
+              />
+            </div>
+
+            {/* ไฟล์ mockup */}
+            <div className="md:col-span-2">
+              <div className={labelCls}>สลิปโอนเงิน (Mockup)</div>
+              <input
+                type="file"
+                className="block w-full text-sm text-slate-900"
+              />
+              <div className="mt-1 text-[11px] text-gray-500">
+                แนบเพื่อทดสอบการแสดงผลในหน้า “รายละเอียดการจอง”
+              </div>
             </div>
           </div>
 
@@ -437,7 +513,8 @@ function EditModal({ open, data, onClose, onSaved }) {
           )}
         </div>
 
-        <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-3">
+        {/* footer */}
+        <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-3 text-black">
           <button
             onClick={onClose}
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50"
@@ -458,29 +535,28 @@ function EditModal({ open, data, onClose, onSaved }) {
   );
 }
 
-/* ───────── Component ───────── */
+/* ───────── ตาราง ───────── */
 export default function BookingsTable({
   bookings = [],
   carMapById = new Map(),
   carMapByKey = new Map(),
   onOpenDetail,
-  onMarkPaid,
   onConfirmPickup,
   onComplete,
-  onEdited, // (optional) ให้ parent อัปเดตเมื่อแก้ไข
+  onEdited,
 }) {
   const [remoteRows, setRemoteRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  // clock สำหรับคำนวณ stage
+  // clock
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60 * 1000);
     return () => clearInterval(id);
   }, []);
 
-  // ดึงข้อมูลเมื่อไม่มี props
+  // fetch เมื่อไม่มี props
   useEffect(() => {
     if (Array.isArray(bookings) && bookings.length > 0) return;
     let ignore = false;
@@ -488,10 +564,9 @@ export default function BookingsTable({
       try {
         setLoading(true);
         setErr("");
-        const headers = new Headers();
         const res = await fetch(
           "https://demo.erpeazy.com/api/method/erpnext.api.get_rentals_overall",
-          { method: "GET", headers, credentials: "include", redirect: "follow" }
+          { method: "GET", credentials: "include", redirect: "follow" }
         );
         const text = await res.text();
         let json;
@@ -524,14 +599,13 @@ export default function BookingsTable({
     return remoteRows;
   }, [bookings, remoteRows]);
 
-  /* ───────── Filters ───────── */
+  /* ฟิลเตอร์ */
   const [q, setQ] = useState("");
   const [statusF, setStatusF] = useState("");
 
   const filtered = useMemo(() => {
     const key = q.trim().toLowerCase();
     return rows.filter((r) => {
-      // text match
       const texts = [
         r.bookingCode,
         r.customerName,
@@ -546,17 +620,32 @@ export default function BookingsTable({
         .map((s) => String(s).toLowerCase());
       const okText = !key || texts.some((t) => t.includes(key));
 
-      // status match by stage
       const stage = getLifecycle(r, now);
       const okStatus = !statusF || stage === statusF;
-
       return okText && okStatus;
     });
   }, [rows, q, statusF, now]);
 
-  /* ───────── Edit modal states ───────── */
+  /* edit modal states */
   const [editOpen, setEditOpen] = useState(false);
   const [editRow, setEditRow] = useState(null);
+
+  const carOptions = useMemo(() => {
+    // รวมรายการรถจาก props map หรือจากข้อมูลในตาราง
+    const temp = new Map();
+    const push = (name, plate, price) => {
+      const key = `${name}|${plate}`;
+      if (!temp.has(key)) temp.set(key, { name, plate, pricePerDay: price });
+    };
+    rows.forEach((r) => push(r.carName, r.carPlate, r.pricePerDay));
+    carMapByKey.forEach((v, k) =>
+      push(v?.name || k, v?.plate || "", v?.pricePerDay || 0)
+    );
+    carMapById.forEach((v) =>
+      push(v?.name || "", v?.plate || "", v?.pricePerDay || 0)
+    );
+    return [...temp.values()];
+  }, [rows, carMapById, carMapByKey]);
 
   const openEdit = (row) => {
     setEditRow(row);
@@ -565,10 +654,7 @@ export default function BookingsTable({
   const closeEdit = () => setEditOpen(false);
 
   const applyEditedLocal = (newRec) => {
-    // ถ้า parent ให้ onEdited มา ก็ให้ parent จัดการ
     onEdited?.(newRec);
-
-    // ถ้าใช้โหมดดึงข้อมูลเอง ให้แก้ local state
     if (!(Array.isArray(bookings) && bookings.length > 0)) {
       setRemoteRows((prev) =>
         prev.map((r) =>
@@ -589,7 +675,7 @@ export default function BookingsTable({
         </span>
       </div>
 
-      {/* ───── Filters bar (ไม่มีช่องสถานะชำระเงิน) ───── */}
+      {/* filter bar */}
       <div className="mt-4 grid grid-cols-1 md:grid-cols-[1fr_220px_auto] gap-3 items-end">
         <div>
           <div className="text-xs font-semibold text-slate-700 mb-1">ค้นหา</div>
@@ -600,7 +686,6 @@ export default function BookingsTable({
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
           />
         </div>
-
         <div>
           <div className="text-xs font-semibold text-slate-700 mb-1">
             สถานะการจอง
@@ -617,7 +702,6 @@ export default function BookingsTable({
             ))}
           </select>
         </div>
-
         <button
           type="button"
           onClick={() => {
@@ -650,7 +734,6 @@ export default function BookingsTable({
                 <th className="py-2 pr-3">การจัดการ</th>
               </tr>
             </thead>
-
             <tbody className="divide-y divide-gray-100">
               {filtered.map((b) => {
                 const days = computeDays(b.pickupTime, b.returnTime);
@@ -698,14 +781,12 @@ export default function BookingsTable({
                     </td>
                     <td className="py-3 pr-3">
                       <div className="flex flex-wrap gap-2">
-                        {/* ปุ่มแก้ไข ใหม่ */}
                         <button
                           onClick={() => openEdit(b)}
                           className="rounded-lg border border-gray-300 bg-gray-200 px-3 py-1.5 text-black hover:bg-gray-300"
                         >
                           แก้ไข
                         </button>
-
                         <button
                           onClick={() => onOpenDetail?.(b)}
                           className="rounded-lg border border-gray-300 bg-gray-200 px-3 py-1.5 text-black hover:bg-gray-300"
@@ -713,7 +794,6 @@ export default function BookingsTable({
                         >
                           รายละเอียด
                         </button>
-
                         {canConfirmPickup && (
                           <button
                             onClick={() => onConfirmPickup?.(b)}
@@ -737,7 +817,6 @@ export default function BookingsTable({
                   </tr>
                 );
               })}
-
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={10} className="py-6 text-center text-gray-600">
@@ -754,9 +833,13 @@ export default function BookingsTable({
       <EditModal
         open={editOpen}
         data={editRow}
+        carOptions={carOptions}
         onClose={closeEdit}
         onSaved={applyEditedLocal}
       />
     </div>
   );
 }
+
+/* เผื่อไฟล์หน้าอื่น import แบบ named */
+export { BookingsTable };
