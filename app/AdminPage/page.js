@@ -2593,19 +2593,7 @@ export default function AdminPage() {
                   className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
                 />
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-semibold text-black mb-1">
-                  มัดจำ (บาท)
-                </label>
-                <input
-                  type="number"
-                  name="deposit"
-                  min="0"
-                  value={bkEditForm.deposit}
-                  onChange={handleBkEditChange}
-                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black"
-                />
-              </div>
+
               <div className="md:col-span-2">
                 <label className="block text-xs font-semibold text-black mb-1">
                   ช่องทาง
@@ -2651,21 +2639,6 @@ export default function AdminPage() {
                   <option>ยกเลิก</option>
                   <option>เสร็จสิ้น</option>
                 </select>
-              </div>
-
-              {/* Extras as text */}
-              <div className="md:col-span-6">
-                <label className="block text-xs font-semibold text-black mb-1">
-                  ออปชันเสริม (name:price ต่อบรรทัด)
-                </label>
-                <textarea
-                  name="extrasText"
-                  rows={3}
-                  value={bkEditForm.extrasText}
-                  onChange={handleBkEditChange}
-                  className="w-full rounded-lg border border-gray-400 px-3 py-2 text-black placeholder:text-gray-400"
-                  placeholder="คาร์ซีท:100&#10;GPS:60"
-                />
               </div>
 
               {/* Notes */}

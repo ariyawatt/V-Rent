@@ -1,117 +1,762 @@
-// components/admin/BookingsTable.jsx
-import { BookingBadge, PayBadge } from "./Badges";
-import { fmtBaht, fmtDateTimeLocal, computeDays } from "./utils";
+"use client";
 
+import { useEffect, useMemo, useState } from "react";
+
+/* ───────── helpers ───────── */
+const toDate = (val) => {
+  if (!val) return null;
+  const s = String(val).trim();
+  const isoish = s.includes("T") ? s : s.replace(" ", "T");
+  const d = new Date(isoish);
+  return isNaN(d.getTime()) ? null : d;
+};
+const fmtDateTimeLocal = (val) => {
+  const d = toDate(val);
+  if (!d) return "-";
+  return d.toLocaleString("th-TH", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+const computeDays = (a, b) => {
+  const A = toDate(a);
+  const B = toDate(b);
+  if (!A || !B) return 1;
+  const diff = Math.ceil((B - A) / (1000 * 60 * 60 * 24));
+  return Math.max(diff, 1);
+};
+const fmtBaht = (n) => Number(n || 0).toLocaleString("th-TH");
+
+/* ───────── badges ───────── */
+function PayBadge({ value }) {
+  const v = String(value || "")
+    .toLowerCase()
+    .trim();
+  if (v === "paid") {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800">
+        ชำระแล้ว
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-700">
+      –
+    </span>
+  );
+}
+
+function BookingBadge({ value }) {
+  const v = String(value || "")
+    .toLowerCase()
+    .trim();
+  const MAP = {
+    confirmed: { label: "ยืนยันแล้ว", cls: "bg-sky-100 text-sky-800" },
+    "waiting pickup": { label: "รอรับ", cls: "bg-amber-100 text-amber-800" },
+    "pickup overdue": {
+      label: "เลยกำหนดรับ",
+      cls: "bg-rose-100 text-rose-800",
+    },
+    "in use": { label: "กำลังเช่า", cls: "bg-indigo-100 text-indigo-800" },
+    "return overdue": {
+      label: "เลยกำหนดคืน",
+      cls: "bg-rose-100 text-rose-800",
+    },
+    cancelled: { label: "ยกเลิก", cls: "bg-slate-200 text-slate-700" },
+    completed: { label: "เสร็จสิ้น", cls: "bg-violet-100 text-violet-800" },
+  };
+  const m = MAP[v] || {
+    label: value || "-",
+    cls: "bg-slate-100 text-slate-700",
+  };
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${m.cls}`}
+    >
+      {m.label}
+    </span>
+  );
+}
+
+/* ───────── normalize record ───────── */
+function normalizeRental(rec) {
+  const pickupTime =
+    rec?.pickup_date ||
+    rec?.pickup_time ||
+    rec?.start_date ||
+    rec?.start_time ||
+    null;
+  const returnTime =
+    rec?.return_date ||
+    rec?.dropoff_date ||
+    rec?.end_date ||
+    rec?.return_time ||
+    null;
+
+  const bookingCode =
+    rec?.booking_code ||
+    rec?.rental_no ||
+    rec?.name ||
+    rec?.id ||
+    rec?.code ||
+    "-";
+
+  const customerName =
+    rec?.customer_name ||
+    rec?.customer ||
+    `${rec?.customer_first_name ?? ""} ${
+      rec?.customer_last_name ?? ""
+    }`.trim() ||
+    "-";
+  const customerPhone =
+    rec?.customer_phone || rec?.phone || rec?.mobile_no || rec?.mobile || "";
+
+  const carName =
+    rec?.vehicle || rec?.car_name || rec?.car || rec?.vehicle_name || "-";
+  const carPlate = rec?.license_plate || rec?.car_plate || rec?.plate || "";
+
+  const pricePerDay =
+    Number(
+      rec?.price_per_day ??
+        rec?.daily_rate ??
+        rec?.rate ??
+        rec?.price ??
+        rec?.base_price_per_day ??
+        0
+    ) || 0;
+
+  const discount = Number(rec?.discount ?? rec?.discount_amount ?? 0) || 0;
+  const addon = Number(rec?.extras_total ?? rec?.additional_total ?? 0) || 0;
+
+  const daysFallback = computeDays(pickupTime, returnTime);
+  const totalComputed = pricePerDay * daysFallback + addon - discount;
+
+  const total =
+    Number(
+      rec?.total_price ??
+        rec?.grand_total ??
+        rec?.net_total ??
+        rec?.amount ??
+        totalComputed
+    ) || totalComputed;
+
+  const payRaw = String(
+    rec?.payment_status || rec?.pay_status || rec?.payment || ""
+  ).toLowerCase();
+  const paymentStatus = payRaw.includes("paid") ? "paid" : "";
+
+  let bookingStatus = String(rec?.status || rec?.booking_status || "")
+    .toLowerCase()
+    .trim();
+
+  return {
+    id: bookingCode,
+    bookingCode,
+    customerName,
+    customerPhone,
+    carName,
+    carPlate,
+    pricePerDay,
+    pickupTime,
+    returnTime,
+    paymentStatus,
+    bookingStatus,
+    discount,
+    addon,
+    total,
+    pickupLocation: rec?.pickup_location || rec?.pickup_place || "",
+    returnLocation: rec?.return_location || rec?.return_place || "",
+    channel: rec?.contact_platform || rec?.source || "",
+  };
+}
+
+/* ───────── lifecycle (stage) ───────── */
+function getLifecycle(row, now = new Date()) {
+  const status = String(row.bookingStatus || "")
+    .toLowerCase()
+    .trim();
+  const pickup = toDate(row.pickupTime);
+  const drop = toDate(row.returnTime);
+
+  if (status === "cancelled") return "cancelled";
+  if (status === "completed") return "completed";
+
+  if (status === "in use") {
+    if (drop && now > drop) return "return overdue";
+    return "in use";
+  }
+  if (status === "waiting pickup" || status === "confirmed") {
+    if (pickup && now > pickup) return "pickup overdue";
+    return "waiting pickup";
+  }
+
+  if (pickup && now > pickup) return "pickup overdue";
+  if (drop && now > drop) return "return overdue";
+  return status || "confirmed";
+}
+
+/* สถานะที่เลือกได้ในตัวกรอง — เอา 'confirmed' ออก */
+const STATUS_OPTIONS = [
+  { value: "", label: "ทั้งหมด" },
+  { value: "waiting pickup", label: "รอรับ" },
+  { value: "pickup overdue", label: "เลยกำหนดรับ" },
+  { value: "in use", label: "กำลังเช่า" },
+  { value: "return overdue", label: "เลยกำหนดคืน" },
+  { value: "cancelled", label: "ยกเลิก" },
+  { value: "completed", label: "เสร็จสิ้น" },
+];
+
+/* ───────── API mapping ───────── */
+// map ระหว่างค่าภายใน UI ↔ สตริงที่ API ฝั่ง Frappe รับ
+const UI_TO_API_STATUS = {
+  "waiting pickup": "Waiting Pickup",
+  "pickup overdue": "Pickup Overdue",
+  "in use": "In Use",
+  "return overdue": "Return Overdue",
+  cancelled: "Cancelled",
+  completed: "Completed",
+  confirmed: "Confirmed",
+};
+const API_TO_UI_STATUS = Object.fromEntries(
+  Object.entries(UI_TO_API_STATUS).map(([k, v]) => [v.toLowerCase(), k])
+);
+
+/* ───────── Edit Modal ───────── */
+function EditModal({ open, data, onClose, onSaved }) {
+  const [form, setForm] = useState(data || {});
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    setForm(data || {});
+    setErr("");
+  }, [data]);
+
+  if (!open) return null;
+
+  const set = (k, v) => setForm((s) => ({ ...s, [k]: v }));
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      setErr("");
+
+      // ถ้าไม่ได้เปลี่ยนสถานะก็จะไม่ยิง API
+      const uiStatus = String(form.bookingStatus || "")
+        .toLowerCase()
+        .trim();
+      const apiStatus = UI_TO_API_STATUS[uiStatus];
+      if (apiStatus && form.bookingCode) {
+        const myHeaders = new Headers();
+        myHeaders.append("Content-Type", "application/json");
+        const body = JSON.stringify({
+          vid: form.bookingCode,
+          status: apiStatus,
+        });
+
+        const res = await fetch(
+          "https://demo.erpeazy.com/api/method/erpnext.api.edit_rentals_status",
+          {
+            method: "POST",
+            headers: myHeaders,
+            body,
+            redirect: "follow",
+            credentials: "include",
+          }
+        );
+        const text = await res.text();
+        if (!res.ok) throw new Error(text || "เปลี่ยนสถานะไม่สำเร็จ");
+
+        // แปลงสถานะตอบกลับ (ถ้า API คืนข้อความสถานะ)
+        const lowerText = text.toLowerCase();
+        let normalizedStatus = uiStatus;
+        Object.entries(API_TO_UI_STATUS).forEach(([apiLower, ui]) => {
+          if (lowerText.includes(apiLower)) normalizedStatus = ui;
+        });
+
+        // แจ้งกลับให้ตารางอัปเดต
+        onSaved?.({ ...form, bookingStatus: normalizedStatus });
+      } else {
+        onSaved?.(form);
+      }
+
+      onClose?.();
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-3xl rounded-xl bg-white shadow-xl">
+        <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-black">แก้ไขการจอง</h3>
+          <button
+            onClick={onClose}
+            className="rounded-md px-2 py-1 text-sm hover:bg-gray-100"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="p-5">
+          {/* แถว 1 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                รหัสจอง
+              </div>
+              <input
+                value={form.bookingCode || ""}
+                disabled
+                className="w-full rounded-lg border border-slate-300 bg-gray-50 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                เบอร์โทร
+              </div>
+              <input
+                value={form.customerPhone || ""}
+                onChange={(e) => set("customerPhone", e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                ชื่อลูกค้า
+              </div>
+              <input
+                value={form.customerName || ""}
+                onChange={(e) => set("customerName", e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                รถ/ทะเบียน
+              </div>
+              <input
+                value={`${form.carName || "—"} / ${form.carPlate || "—"}`}
+                onChange={() => {}}
+                disabled
+                className="w-full rounded-lg border border-slate-300 bg-gray-50 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                วัน-เวลา รับรถ
+              </div>
+              <input
+                type="datetime-local"
+                value={(form.pickupTime || "").replace(" ", "T").slice(0, 16)}
+                onChange={(e) => set("pickupTime", e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                วัน-เวลา คืนรถ
+              </div>
+              <input
+                type="datetime-local"
+                value={(form.returnTime || "").replace(" ", "T").slice(0, 16)}
+                onChange={(e) => set("returnTime", e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                ราคา/วัน (บาท)
+              </div>
+              <input
+                type="number"
+                value={form.pricePerDay ?? 0}
+                onChange={(e) =>
+                  set("pricePerDay", Number(e.target.value || 0))
+                }
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                ช่องทาง
+              </div>
+              <input
+                value={form.channel || ""}
+                onChange={(e) => set("channel", e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                สถานะชำระเงิน
+              </div>
+              <select
+                value={form.paymentStatus || ""}
+                onChange={(e) => set("paymentStatus", e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="">รอชำระ / ไม่ระบุ</option>
+                <option value="paid">ชำระแล้ว</option>
+              </select>
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                สถานะการจอง
+              </div>
+              <select
+                value={String(form.bookingStatus || "").toLowerCase()}
+                onChange={(e) => set("bookingStatus", e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="confirmed">ยืนยันแล้ว</option>
+                <option value="waiting pickup">รอรับ</option>
+                <option value="pickup overdue">เลยกำหนดรับ</option>
+                <option value="in use">กำลังเช่า</option>
+                <option value="return overdue">เลยกำหนดคืน</option>
+                <option value="cancelled">ยกเลิก</option>
+                <option value="completed">เสร็จสิ้น</option>
+              </select>
+            </div>
+          </div>
+
+          {err && (
+            <div className="mt-3 text-sm text-rose-600">
+              เกิดข้อผิดพลาด: {err}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50"
+            disabled={saving}
+          >
+            ยกเลิก
+          </button>
+          <button
+            onClick={handleSave}
+            className="rounded-lg bg-black text-white px-4 py-2 text-sm hover:opacity-90 disabled:opacity-60"
+            disabled={saving}
+          >
+            {saving ? "กำลังบันทึก…" : "บันทึกการเปลี่ยนแปลง"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ───────── Component ───────── */
 export default function BookingsTable({
-  bookings,
-  carMapById,
-  carMapByKey,
-  now,
+  bookings = [],
+  carMapById = new Map(),
+  carMapByKey = new Map(),
   onOpenDetail,
   onMarkPaid,
   onConfirmPickup,
   onComplete,
+  onEdited, // (optional) ให้ parent อัปเดตเมื่อแก้ไข
 }) {
+  const [remoteRows, setRemoteRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  // clock สำหรับคำนวณ stage
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ดึงข้อมูลเมื่อไม่มี props
+  useEffect(() => {
+    if (Array.isArray(bookings) && bookings.length > 0) return;
+    let ignore = false;
+    (async () => {
+      try {
+        setLoading(true);
+        setErr("");
+        const headers = new Headers();
+        const res = await fetch(
+          "https://demo.erpeazy.com/api/method/erpnext.api.get_rentals_overall",
+          { method: "GET", headers, credentials: "include", redirect: "follow" }
+        );
+        const text = await res.text();
+        let json;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          throw new Error(text);
+        }
+        const list = Array.isArray(json?.message)
+          ? json.message
+          : Array.isArray(json)
+          ? json
+          : [];
+        if (!ignore) setRemoteRows(list.map(normalizeRental));
+      } catch (e) {
+        if (!ignore) setErr(String(e?.message || e));
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [bookings]);
+
+  const rows = useMemo(() => {
+    if (Array.isArray(bookings) && bookings.length > 0) {
+      return bookings.map(normalizeRental);
+    }
+    return remoteRows;
+  }, [bookings, remoteRows]);
+
+  /* ───────── Filters ───────── */
+  const [q, setQ] = useState("");
+  const [statusF, setStatusF] = useState("");
+
+  const filtered = useMemo(() => {
+    const key = q.trim().toLowerCase();
+    return rows.filter((r) => {
+      // text match
+      const texts = [
+        r.bookingCode,
+        r.customerName,
+        r.customerPhone,
+        r.carName,
+        r.carPlate,
+        r.pickupLocation,
+        r.returnLocation,
+        r.channel,
+      ]
+        .filter(Boolean)
+        .map((s) => String(s).toLowerCase());
+      const okText = !key || texts.some((t) => t.includes(key));
+
+      // status match by stage
+      const stage = getLifecycle(r, now);
+      const okStatus = !statusF || stage === statusF;
+
+      return okText && okStatus;
+    });
+  }, [rows, q, statusF, now]);
+
+  /* ───────── Edit modal states ───────── */
+  const [editOpen, setEditOpen] = useState(false);
+  const [editRow, setEditRow] = useState(null);
+
+  const openEdit = (row) => {
+    setEditRow(row);
+    setEditOpen(true);
+  };
+  const closeEdit = () => setEditOpen(false);
+
+  const applyEditedLocal = (newRec) => {
+    // ถ้า parent ให้ onEdited มา ก็ให้ parent จัดการ
+    onEdited?.(newRec);
+
+    // ถ้าใช้โหมดดึงข้อมูลเอง ให้แก้ local state
+    if (!(Array.isArray(bookings) && bookings.length > 0)) {
+      setRemoteRows((prev) =>
+        prev.map((r) =>
+          r.id === newRec.id || r.bookingCode === newRec.bookingCode
+            ? { ...r, ...newRec }
+            : r
+        )
+      );
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-black">ตารางการจองของลูกค้า</h2>
         <span className="text-sm text-gray-600">
-          ทั้งหมด {bookings.length} รายการ
+          แสดง {filtered.length} / {rows.length} รายการ
         </span>
       </div>
 
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-full text-sm">
-          <thead>
-            <tr className="text-left text-gray-600">
-              <th className="py-2 pr-3">รับ → คืน</th>
-              <th className="py-2 pr-3">รหัสจอง</th>
-              <th className="py-2 pr-3">ลูกค้า</th>
-              <th className="py-2 pr-3">รถ/ทะเบียน</th>
-              <th className="py-2 pr-3">ราคา/วัน</th>
-              <th className="py-2 pr-3">วันเช่า</th>
-              <th className="py-2 pr-3">รวมสุทธิ</th>
-              <th className="py-2 pr-3">ชำระเงิน</th>
-              <th className="py-2 pr-3">สถานะ</th>
-              <th className="py-2 pr-3">การจัดการ</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {bookings.map((b) => {
-              const car =
-                (b.carId && carMapById.get(b.carId)) ||
-                carMapByKey.get(b.carPlate || b.carName);
-              const days = computeDays(b.pickupTime, b.returnTime);
-              const total =
-                Number(b.pricePerDay || 0) * days +
-                (b.extras?.reduce((t, e) => t + Number(e.price || 0), 0) || 0) -
-                Number(b.discount || 0);
-              return (
-                <tr key={b.id}>
-                  <td className="py-3 pr-3">
-                    <div>{fmtDateTimeLocal(b.pickupTime)}</div>
-                    <div className="text-xs text-gray-500">
-                      → {fmtDateTimeLocal(b.returnTime)}
-                    </div>
-                  </td>
-                  <td className="py-3 pr-3 font-medium text-black">
-                    {b.bookingCode}
-                  </td>
-                  <td className="py-3 pr-3">
-                    <div>{b.customerName}</div>
-                    <div className="text-xs text-gray-500">
-                      {b.customerPhone}
-                    </div>
-                  </td>
-                  <td className="py-3 pr-3">
-                    {(car?.name || b.carName || "—") +
-                      " / " +
-                      (car?.licensePlate || b.carPlate || "—")}
-                  </td>
-                  <td className="py-3 pr-3">{fmtBaht(b.pricePerDay)} ฿</td>
-                  <td className="py-3 pr-3">{days} วัน</td>
-                  <td className="py-3 pr-3">{fmtBaht(total)} ฿</td>
-                  <td className="py-3 pr-3">
-                    <PayBadge value={b.paymentStatus} />
-                  </td>
-                  <td className="py-3 pr-3">
-                    <BookingBadge value={b.bookingStatus} />
-                  </td>
-                  <td className="py-3 pr-3">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => onOpenDetail(b)}
-                        className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
-                      >
-                        ดู
-                      </button>
-                      <button
-                        onClick={() => onMarkPaid(b)}
-                        className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
-                      >
-                        มาร์คชำระ
-                      </button>
-                      <button
-                        onClick={() => onConfirmPickup(b)}
-                        className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
-                      >
-                        รับรถ
-                      </button>
-                      <button
-                        onClick={() => onComplete(b)}
-                        className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
-                      >
-                        ปิดงาน
-                      </button>
-                    </div>
+      {/* ───── Filters bar (ไม่มีช่องสถานะชำระเงิน) ───── */}
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-[1fr_220px_auto] gap-3 items-end">
+        <div>
+          <div className="text-xs font-semibold text-slate-700 mb-1">ค้นหา</div>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="รหัสจอง / ลูกค้า / รถ / ป้าย / สถานที่ / ช่องทาง…"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
+          />
+        </div>
+
+        <div>
+          <div className="text-xs font-semibold text-slate-700 mb-1">
+            สถานะการจอง
+          </div>
+          <select
+            value={statusF}
+            onChange={(e) => setStatusF(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value || "all"} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            setQ("");
+            setStatusF("");
+          }}
+          className="h-[38px] md:h-[40px] rounded-lg border border-slate-300 px-3 text-sm text-slate-900 hover:bg-slate-50"
+        >
+          ล้างตัวกรอง
+        </button>
+      </div>
+
+      {loading && <div className="mt-4 text-gray-600">กำลังโหลด...</div>}
+      {err && <div className="mt-4 text-red-600">เกิดข้อผิดพลาด: {err}</div>}
+
+      {!loading && !err && (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-600">
+                <th className="py-2 pr-3">รับ → คืน</th>
+                <th className="py-2 pr-3">รหัสจอง</th>
+                <th className="py-2 pr-3">ลูกค้า</th>
+                <th className="py-2 pr-3">รถ/ทะเบียน</th>
+                <th className="py-2 pr-3">ราคา/วัน</th>
+                <th className="py-2 pr-3">วันเช่า</th>
+                <th className="py-2 pr-3">รวมสุทธิ</th>
+                <th className="py-2 pr-3">ชำระเงิน</th>
+                <th className="py-2 pr-3">สถานะ</th>
+                <th className="py-2 pr-3">การจัดการ</th>
+              </tr>
+            </thead>
+
+            <tbody className="divide-y divide-gray-100">
+              {filtered.map((b) => {
+                const days = computeDays(b.pickupTime, b.returnTime);
+                const total = b.total ?? b.pricePerDay * days;
+                const life = getLifecycle(b, now);
+                const ended = ["cancelled", "completed"].includes(
+                  String(b.bookingStatus || "").toLowerCase()
+                );
+                const canConfirmPickup =
+                  (life === "waiting pickup" || life === "pickup overdue") &&
+                  !ended;
+                const canComplete =
+                  (life === "in use" || life === "return overdue") && !ended;
+
+                return (
+                  <tr key={b.id}>
+                    <td className="py-3 pr-3 text-black">
+                      <div>{fmtDateTimeLocal(b.pickupTime)}</div>
+                      <div className="text-xs text-gray-500">
+                        → {fmtDateTimeLocal(b.returnTime)}
+                      </div>
+                    </td>
+                    <td className="py-3 pr-3 font-medium text-black">
+                      {b.bookingCode}
+                    </td>
+                    <td className="py-3 pr-3 text-black">
+                      <div>{b.customerName}</div>
+                      <div className="text-xs text-gray-500">
+                        {b.customerPhone}
+                      </div>
+                    </td>
+                    <td className="py-3 pr-3 text-black">
+                      {(b.carName || "—") + " / " + (b.carPlate || "—")}
+                    </td>
+                    <td className="py-3 pr-3 text-black">
+                      {fmtBaht(b.pricePerDay)} ฿
+                    </td>
+                    <td className="py-3 pr-3 text-black">{days} วัน</td>
+                    <td className="py-3 pr-3 text-black">{fmtBaht(total)} ฿</td>
+                    <td className="py-3 pr-3 text-black">
+                      <PayBadge value={b.paymentStatus} />
+                    </td>
+                    <td className="py-3 pr-3">
+                      <BookingBadge value={life} />
+                    </td>
+                    <td className="py-3 pr-3">
+                      <div className="flex flex-wrap gap-2">
+                        {/* ปุ่มแก้ไข ใหม่ */}
+                        <button
+                          onClick={() => openEdit(b)}
+                          className="rounded-lg border border-gray-300 bg-gray-200 px-3 py-1.5 text-black hover:bg-gray-300"
+                        >
+                          แก้ไข
+                        </button>
+
+                        <button
+                          onClick={() => onOpenDetail?.(b)}
+                          className="rounded-lg border border-gray-300 bg-gray-200 px-3 py-1.5 text-black hover:bg-gray-300"
+                          disabled={!onOpenDetail}
+                        >
+                          รายละเอียด
+                        </button>
+
+                        {canConfirmPickup && (
+                          <button
+                            onClick={() => onConfirmPickup?.(b)}
+                            className="rounded-lg border border-gray-300 bg-gray-200 px-3 py-1.5 text-black hover:bg-gray-300"
+                            disabled={!onConfirmPickup}
+                          >
+                            รับรถ
+                          </button>
+                        )}
+                        {canComplete && (
+                          <button
+                            onClick={() => onComplete?.(b)}
+                            className="rounded-lg border border-gray-300 bg-gray-200 px-3 py-1.5 text-black hover:bg-gray-300"
+                            disabled={!onComplete}
+                          >
+                            เสร็จสิ้น
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="py-6 text-center text-gray-600">
+                    ไม่พบรายการที่ตรงกับตัวกรอง
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal แก้ไข */}
+      <EditModal
+        open={editOpen}
+        data={editRow}
+        onClose={closeEdit}
+        onSaved={applyEditedLocal}
+      />
     </div>
   );
 }
