@@ -13,7 +13,7 @@ const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black";
 const cardCls = "bg-white rounded-2xl shadow-lg border border-slate-200";
 
-/* ---------- statuses (เหลือแค่ ส่งมอบ/เสร็จสิ้น) ---------- */
+/* ---------- statuses ---------- */
 const STATUS = {
   pending: { label: "ส่งมอบ", badge: "bg-amber-100 text-amber-800" },
   done: { label: "เสร็จสิ้น", badge: "bg-emerald-100 text-emerald-800" },
@@ -157,7 +157,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
       <div className="flex items-center justify-between">
         <p className={labelCls}>{title}</p>
         <button
-          type="button"
+          type="button" /* ป้องกัน submit ฟอร์ม */
           onClick={() => openCamera()}
           disabled={disabled}
           className={cx(
@@ -189,7 +189,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
           ))}
         </select>
         <button
-          type="button"
+          type="button" /* ป้องกัน submit ฟอร์ม */
           onClick={switchCamera}
           disabled={devices.length < 2}
           className={cx(
@@ -239,6 +239,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
             />
             <div className="p-3 bg-black/60 flex items-center justify-between">
               <button
+                type="button" /* ป้องกัน submit ฟอร์ม */
                 onClick={() => {
                   setIsOpen(false);
                   stopStream();
@@ -249,6 +250,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
               </button>
               <div className="flex items-center gap-2">
                 <button
+                  type="button" /* ป้องกัน submit ฟอร์ม */
                   onClick={switchCamera}
                   disabled={devices.length < 2}
                   className={cx(
@@ -261,6 +263,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
                   สลับกล้อง
                 </button>
                 <button
+                  type="button" /* ป้องกัน submit ฟอร์ม */
                   onClick={takeShot}
                   className="px-4 py-2 rounded-lg bg-white text-black font-semibold hover:bg-slate-200"
                 >
@@ -301,6 +304,9 @@ function AdminDeliveryContent() {
   const [queue, setQueue] = useState([]);
   const [queueLoading, setQueueLoading] = useState(true);
   const [queueErr, setQueueErr] = useState("");
+
+  // 🔒 ล็อกปุ่มระหว่างส่ง
+  const [submitting, setSubmitting] = useState(false);
 
   /* ---- fetch rentals ---- */
   useEffect(() => {
@@ -372,32 +378,141 @@ function AdminDeliveryContent() {
     });
   };
 
-  const handleSubmit = (e) => {
+  // 🔄 อัปเดตสถานะใบจองเป็น In Use
+  const updateRentalStatus = async (vid, status = "In Use") => {
+    const headers = new Headers();
+    headers.append("Content-Type", "application/json");
+
+    const res = await fetch(
+      "https://demo.erpeazy.com/api/method/erpnext.api.edit_rentals_status",
+      {
+        method: "POST",
+        headers,
+        credentials: "include",
+        redirect: "follow",
+        body: JSON.stringify({ vid, status }),
+      }
+    );
+
+    const text = await res.text();
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = { raw: text };
+    }
+    if (!res.ok) {
+      throw new Error(json?.message || json?.exception || `HTTP ${res.status}`);
+    }
+    return json;
+  };
+
+  /* ---- ✅ เชื่อม API ส่งฟอร์ม + รีเฟรชหน้า ---- */
+  const handleSubmit = async (e) => {
     e.preventDefault();
+
     const required = ["bookingCode", "customerName", "customerPhone"];
-    const missing = required.filter((k) => !form[k]);
-    if (missing.length) return alert("กรุณากรอก: " + missing.join(", "));
-    if (
-      idProofs.length === 0 &&
-      !confirm("ยังไม่มีรูปยืนยันตัวตน บันทึกต่อหรือไม่?")
-    )
+    const missing = required.filter((k) => !form[k]?.trim());
+    if (missing.length) {
+      alert("กรุณากรอก: " + missing.join(", "));
       return;
+    }
+
+    if (idProofs.length === 0) {
+      alert("กรุณาแนบรูปยืนยันตัวตนอย่างน้อย 1 รูป");
+      return;
+    }
+
+    const verifyLabel =
+      {
+        citizen_id: "บัตรประชาชน",
+        driver_license: "ใบขับขี่",
+        passport: "Passport",
+      }[form.verifyType] ||
+      form.verifyType ||
+      "";
 
     const fd = new FormData();
-    Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ""));
-    idProofs.forEach((p, i) =>
-      fd.append(`id_proof_${i + 1}`, p.blob, `id_proof_${i + 1}.jpg`)
-    );
-    carProofs.forEach((p, i) =>
-      fd.append(`car_proof_${i + 1}`, p.blob, `car_proof_${i + 1}.jpg`)
-    );
+    fd.append("rental_no", form.bookingCode || "");
+    fd.append("remark", form.notes || "");
+    const employeeName =
+      (typeof window !== "undefined" &&
+        (localStorage.getItem("vrent_full_name") ||
+          localStorage.getItem("vrent_user_name"))) ||
+      "";
+    fd.append("employee", employeeName);
+    fd.append("downpayment", form.depositReceived ? "received" : "pending");
+    fd.append("customer", form.customerName || "");
+    fd.append("customer_tel", form.customerPhone || "");
+    fd.append("document", verifyLabel);
 
-    console.log("DELIVERY_SUBMIT_FORMDATA", {
-      ...form,
-      idProofsCount: idProofs.length,
-      carProofsCount: carProofs.length,
+    if (form.carPlate) fd.append("car_plate", form.carPlate);
+    if (form.carName) fd.append("car_name", form.carName);
+    if (form.pickupLocation) fd.append("pickup_location", form.pickupLocation);
+    if (form.pickupTime)
+      fd.append("pickup_time", new Date(form.pickupTime).toISOString());
+    if (form.returnLocation) fd.append("return_location", form.returnLocation);
+    if (form.returnTime)
+      fd.append("return_time", new Date(form.returnTime).toISOString());
+    if (form.fuelLevel) fd.append("fuel_level", form.fuelLevel);
+    if (form.odometer)
+      fd.append("odometer", String(form.odometer).replace(/,/g, ""));
+
+    idProofs.forEach((p, i) => {
+      if (p?.blob) fd.append("confirm_proofs", p.blob, `id_proof_${i + 1}.jpg`);
     });
-    alert("บันทึกสำเร็จ (demo) — พร้อมส่งรูปเป็นไฟล์ไป backend");
+    carProofs.forEach((p, i) => {
+      if (p?.blob) fd.append("car_proofs", p.blob, `car_proof_${i + 1}.jpg`);
+    });
+
+    setSubmitting(true);
+    try {
+      // 1) บันทึกส่งมอบ
+      const res = await fetch(
+        "https://demo.erpeazy.com/api/method/erpnext.api.create_dlv",
+        {
+          method: "POST",
+          body: fd,
+          credentials: "include",
+          redirect: "follow",
+          cache: "no-store",
+        }
+      );
+      const text = await res.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = { raw: text };
+      }
+      if (!res.ok) {
+        console.error("DLV_CREATE_ERROR", json);
+        alert(
+          "บันทึกล้มเหลว: " +
+            (json?.exception || json?.message || `HTTP ${res.status}`)
+        );
+        return;
+      }
+
+      // 2) เปลี่ยนสถานะใบจองเป็น In Use
+      try {
+        await updateRentalStatus(form.bookingCode, "In Use");
+      } catch (e) {
+        console.error("RENTAL_STATUS_UPDATE_ERROR", e);
+        alert(
+          "บันทึกส่งมอบสำเร็จ แต่เปลี่ยนสถานะไม่สำเร็จ: " +
+            (e.message || String(e))
+        );
+      }
+
+      // 3) รีเฟรชหน้าเร็วๆ
+      window.location.reload();
+    } catch (err) {
+      console.error(err);
+      alert("เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   /* ---- fill form when click "เปิดฟอร์ม" ---- */
@@ -579,19 +694,7 @@ function AdminDeliveryContent() {
                 placeholder="เช่น 35,420"
               />
             </div>
-            <div className="space-y-2">
-              <label className={labelCls}>เงินมัดจำ</label>
-              <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">
-                <input
-                  type="checkbox"
-                  name="depositReceived"
-                  checked={form.depositReceived}
-                  onChange={onField}
-                  className="h-4 w-4 accent-black"
-                />
-                ได้รับเรียบร้อย
-              </label>
-            </div>
+            <div className="space-y-2"></div>
           </div>
 
           {/* verify type */}
@@ -751,9 +854,10 @@ function AdminDeliveryContent() {
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-lg bg-black text-white font-semibold hover:bg-slate-900"
+              disabled={submitting}
+              className="px-5 py-2.5 rounded-lg bg-black text-white font-semibold hover:bg-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              บันทึกข้อมูลส่งมอบ
+              {submitting ? "กำลังบันทึก..." : "บันทึกข้อมูลส่งมอบ"}
             </button>
           </div>
         </form>

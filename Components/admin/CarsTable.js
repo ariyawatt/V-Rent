@@ -614,9 +614,9 @@ export default function CarsTable({
                   onChange={handleEditChange}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-700 focus:ring-gray-700"
                 >
-                  <option value="ว่าง">ว่าง</option>
-                  <option value="ถูกยืมอยู่">ถูกยืมอยู่</option>
-                  <option value="ซ่อมแซม">ซ่อมแซม</option>
+                  <option value="Available">ว่าง</option>
+                  <option value="In Use">ถูกยืมอยู่</option>
+                  <option value="Maintenance">ซ่อมแซม</option>
                 </select>
               </div>
 

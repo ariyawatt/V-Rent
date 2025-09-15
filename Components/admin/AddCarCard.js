@@ -9,10 +9,10 @@ const ERP_CREATE_URL =
 
 export default function AddCarCard({
   form,
-  onChange, // optional (จะถูกเรียกควบคู่กับการอัปเดต localForm)
-  onImageChange, // optional (ถ้า parent อยากทำ preview เอง)
+  onChange, // optional
+  onImageChange, // optional
   fileRef: externalFileRef,
-  onCreated, // optional: callback เมื่อสร้างสำเร็จ
+  onCreated, // optional
 }) {
   const internalFileRef = useRef(null);
   const fileRef = externalFileRef ?? internalFileRef;
@@ -20,7 +20,6 @@ export default function AddCarCard({
   // ---------- Local fallback state ----------
   const [localForm, setLocalForm] = useState(() => normalizeForm(form));
   useEffect(() => {
-    // ถ้า parent เปลี่ยน form (เช่น เคลียร์), sync ลง local
     setLocalForm(normalizeForm(form));
   }, [form]);
 
@@ -28,33 +27,22 @@ export default function AddCarCard({
   const [error, setError] = useState("");
 
   const handleLocalChange = (e) => {
-    // รองรับทั้ง event จริง และ object แบบ { target: { name, value } }
     const { name, value } = e?.target ?? {};
     if (!name) return;
-
-    setLocalForm((prev) => {
-      const next = { ...prev, [name]: value ?? "" };
-      return next;
-    });
-
-    // แจ้ง parent (ถ้ามี)
+    setLocalForm((prev) => ({ ...prev, [name]: value ?? "" }));
     if (typeof onChange === "function") onChange(e);
   };
 
   const handleLocalImageChange = (e) => {
-    // ทำ preview ภายในให้ใช้งานได้ทันที
     const file = e?.target?.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = () =>
         setLocalForm((prev) => ({ ...prev, imageData: String(reader.result) }));
-      };
       reader.readAsDataURL(file);
     } else {
       setLocalForm((prev) => ({ ...prev, imageData: "" }));
     }
-
-    // แจ้ง parent (ถ้ามี)
     if (typeof onImageChange === "function") onImageChange(e);
   };
 
@@ -70,24 +58,33 @@ export default function AddCarCard({
       setSaving(true);
       setError("");
 
-      const fd = new FormData();
+      const formData = new FormData();
+
+      // ไฟล์รูป
       const file = fileRef.current?.files?.[0];
-      if (file) {
-        fd.append("file", file, file.name);
-      }
-      fd.append("license_plate", localForm.licensePlate || "");
-      fd.append("vehicle_name", localForm.name || "");
-      fd.append("status", localForm.status || "ว่าง");
-      fd.append("price", String(localForm.pricePerDay || 0));
-      fd.append("company", localForm.company || "");
-      fd.append("type", localForm.type || "Sedan");
-      fd.append("v_type", localForm.type || "Sedan");
-      fd.append("brand", localForm.brand || "");
-      fd.append("seat", String(localForm.seats || ""));
-      fd.append("year", String(localForm.year || ""));
-      fd.append("gear_system", localForm.transmission || "อัตโนมัติ");
-      fd.append("fuel_type", localForm.fuel || "เบนซิน");
-      fd.append("description", localForm.description || "");
+      if (file) formData.append("file", file, file.name);
+
+      // ฟิลด์หลักที่ ERP รับ
+      formData.append("license_plate", localForm.licensePlate || "");
+      formData.append("vehicle_name", localForm.name || "");
+
+      // สถานะ: เก็บ/ส่งเป็นอังกฤษเสมอ
+      const status = localForm.status || "Available";
+      formData.append("status", status);
+
+      // ราคา (กันกรณี backend ดูคนละคีย์)
+      formData.append("price", String(localForm.pricePerDay || 0));
+      formData.append("price_per_day", String(localForm.pricePerDay || 0));
+
+      formData.append("company", localForm.company || "");
+      formData.append("type", localForm.type || "Sedan");
+      formData.append("v_type", localForm.type || "Sedan");
+      formData.append("brand", localForm.brand || "");
+      formData.append("seat", String(localForm.seats || ""));
+      formData.append("year", String(localForm.year || ""));
+      formData.append("gear_system", localForm.transmission || "อัตโนมัติ");
+      formData.append("fuel_type", localForm.fuel || "เบนซิน");
+      formData.append("description", localForm.description || "");
 
       const headers = new Headers();
       // headers.set("Authorization", ERP_AUTH);
@@ -95,7 +92,7 @@ export default function AddCarCard({
       const res = await fetch(ERP_CREATE_URL, {
         method: "POST",
         headers,
-        body: fd,
+        body: formData,
         credentials: "include",
         redirect: "follow",
       });
@@ -106,10 +103,9 @@ export default function AddCarCard({
       }
 
       clearImageInput();
-
       alert("เพิ่มรถสำเร็จ");
-
-      // ✅ รีเฟรชหน้านี้อัตโนมัติ 1 ครั้ง
+      if (typeof onCreated === "function") onCreated();
+      // reload เพื่อให้ลิสต์ฝั่ง admin/CarBox รับข้อมูลใหม่ทันที
       window.location.reload();
     } catch (err) {
       setError(err?.message || "เพิ่มรถไม่สำเร็จ");
@@ -279,9 +275,9 @@ export default function AddCarCard({
             onChange={handleLocalChange}
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
           >
-            <option value="ว่าง">ว่าง</option>
-            <option value="ถูกยืมอยู่">ถูกยืมอยู่</option>
-            <option value="ซ่อมแซม">ซ่อมแซม</option>
+            <option value="Available">ว่าง</option>
+            <option value="In Use">ถูกยืมอยู่</option>
+            <option value="Maintenance">ซ่อมแซม</option>
           </select>
         </div>
         <div className="xl:col-span-2">
@@ -359,7 +355,6 @@ export default function AddCarCard({
   );
 }
 
-// ป้องกัน undefined/ชนิดไม่ตรงที่ทำให้ input “ค้าง”
 function normalizeForm(f = {}) {
   return {
     name: f.name ?? "",
@@ -371,7 +366,7 @@ function normalizeForm(f = {}) {
     fuel: f.fuel ?? "เบนซิน",
     year: f.year ?? "",
     pricePerDay: f.pricePerDay ?? "",
-    status: f.status ?? "ว่าง",
+    status: f.status ?? "Available", // ✅ default เป็นอังกฤษ
     description: f.description ?? "",
     company: f.company ?? "",
     imageData: f.imageData ?? "",

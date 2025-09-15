@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/Footer";
@@ -50,7 +50,6 @@ function chooseDateStrings(sp) {
 
 export default function ChoosePayment() {
   const sp = useSearchParams();
-  const router = useRouter();
 
   /* ---------- รับพารามิเตอร์ทั้งหมด ---------- */
   // รถ + บริษัท + ราคา
@@ -173,6 +172,7 @@ export default function ChoosePayment() {
     exp: "",
     cvc: "",
   });
+  const [slip, setSlip] = useState(null); // เก็บไฟล์สลิป
   const [submitting, setSubmitting] = useState(false);
 
   // เก็บ query ทั้งชุดไว้ส่งกลับ/ต่อไป
@@ -181,7 +181,7 @@ export default function ChoosePayment() {
     return qs ? `?${qs}` : "";
   }, [sp]);
 
-  // กดชำระเงิน -> เรียก API proxy ของเรา
+  // กดชำระเงิน -> ส่ง FormData ไป ERP
   async function handlePay() {
     if (submitting) return;
     setSubmitting(true);
@@ -194,40 +194,51 @@ export default function ChoosePayment() {
       ].filter(Boolean);
       const additional_options = extrasList.join(", ");
 
-      const payment_status = "Paid";
-      const status = "Confirmed";
+      const fd = new FormData();
+      fd.append("confirmation_document", key || `WEB-${Date.now()}`);
+      fd.append("customer_name", name || (email ? email.split("@")[0] : ""));
+      fd.append("customer_phone", phone || "");
+      fd.append(
+        "vehicle",
+        car?.name || [carBrand, carName].filter(Boolean).join(" ") || "Vehicle"
+      );
+      fd.append("base_price", String(base));
+      fd.append("pickup_place", pickupLocation || "");
+      fd.append("return_place", dropoffLocation || "");
+      fd.append("pickup_date", toErpDateTime(calcPick || displayPick));
+      fd.append("return_date", toErpDateTime(calcDrop || displayDrop));
+      fd.append("discount", "0");
+      fd.append("down_payment", String(total)); // demo: จ่ายเต็ม
+      fd.append("contact_platform", "website");
+      fd.append("additional_options", additional_options);
+      fd.append("remark", note || "");
+      fd.append("total_price", String(total));
 
-      const payload = {
-        confirmation_document: key || `WEB-${Date.now()}`,
-        customer_name: name || (email ? email.split("@")[0] : ""),
-        customer_phone: phone || "",
-        vehicle:
-          car?.name ||
-          [carBrand, carName].filter(Boolean).join(" ") ||
-          "Vehicle",
-        base_price: total, // ถ้าอยากส่งเฉพาะราคารถ: ใช้ base
-        pickup_place: pickupLocation || "",
-        return_place: dropoffLocation || "",
-        pickup_date: toErpDateTime(calcPick || displayPick),
-        return_date: toErpDateTime(calcDrop || displayDrop),
-        discount: 0,
-        down_payment: total, // demo: จ่ายเต็ม
-        contact_platform: "website",
-        payment_status,
-        status,
-        additional_options,
-        remark: note || "",
-      };
+      if (slip) {
+        // แนบสลิป (ถ้ามี)
+        fd.append("receipt", slip, slip.name || "receipt.jpg");
+      }
 
-      const r = await fetch("/api/erp/rental/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // สำคัญ: ให้แนบคุกกี้ ERP ที่ฝั่ง server มีสิทธิ์
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(
+        "https://demo.erpeazy.com/api/method/erpnext.api.create_rental",
+        {
+          method: "POST",
+          // อย่าใส่ Content-Type เอง ให้ browser จัดการ boundary ของ FormData
+          body: fd,
+          credentials: "include",
+          redirect: "follow",
+        }
+      );
 
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j?.ok) {
+      const text = await res.text();
+      let j;
+      try {
+        j = JSON.parse(text);
+      } catch {
+        j = { raw: text };
+      }
+
+      if (!res.ok) {
         console.error("ERP create_rental failed:", j);
         alert("ไม่สามารถบันทึกข้อมูลการชำระเงินได้ กรุณาลองใหม่อีกครั้ง");
         setSubmitting(false);
@@ -235,7 +246,7 @@ export default function ChoosePayment() {
       }
 
       alert("ชำระเงินเสร็จสิ้น ขอบคุณค่ะ 🙌");
-      window.location.href = "/"; // หรือ router.push("/")
+      window.location.href = "/";
     } catch (e) {
       console.error(e);
       alert("เกิดข้อผิดพลาดระหว่างบันทึกการชำระเงิน");
@@ -358,11 +369,16 @@ export default function ChoosePayment() {
                             type="file"
                             accept="image/*"
                             className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0] || null;
+                              setSlip(f);
+                            }}
                           />
                           <span>อัปโหลดสลิป</span>
                         </label>
                         <p className="text-xs text-slate-700 mt-1">
                           รองรับ .jpg, .png (สูงสุด ~5MB)
+                          {slip ? ` • ไฟล์: ${slip.name}` : ""}
                         </p>
                       </div>
                     </div>

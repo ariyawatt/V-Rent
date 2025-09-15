@@ -172,6 +172,12 @@ export default function CarInfo() {
     vehicle?.vehicle_image || vehicle?.image || vehicle?.cover
   );
 
+  // ✅ normalize เกียร์/เชื้อเพลิงจากหลายคีย์
+  const transmission =
+    vehicle?.transmission ?? vehicle?.gear_system ?? vehicle?.gear ?? ""; // "อัตโนมัติ" | "ธรรมดา" | อื่น ๆ
+
+  const fuel = vehicle?.fuel ?? vehicle?.fuel_type ?? vehicle?.fueltype ?? ""; // "เบนซิน" | "ดีเซล" | "EV" | อื่น ๆ
+
   /* เตรียม query ส่งต่อไปหน้า booking (รวมสถานที่รับ-คืน) */
   const forward = new URLSearchParams(search.toString());
   forward.set("key", rawKey || idSlug);
@@ -179,10 +185,9 @@ export default function CarInfo() {
   forward.set("carBrand", brand);
   forward.set("carType", type);
   if (vehicle?.year) forward.set("carYear", String(vehicle.year));
-  if (vehicle?.transmission)
-    forward.set("carTransmission", String(vehicle.transmission));
+  if (transmission) forward.set("carTransmission", String(transmission)); // ✅
   if (vehicle?.seats) forward.set("carSeats", String(vehicle.seats));
-  if (vehicle?.fuel) forward.set("carFuel", String(vehicle.fuel));
+  if (fuel) forward.set("carFuel", String(fuel)); // ✅
   if (pricePerDay != null) forward.set("pricePerDay", String(pricePerDay));
   forward.set("companyName", companyName);
   forward.set("companySlug", companySlug);
@@ -244,6 +249,24 @@ export default function CarInfo() {
                 </p>
               )}
 
+              {/* ✅ แสดงเกียร์/เชื้อเพลิงเป็น badge */}
+              {(transmission || fuel) && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {transmission && (
+                    <span className="inline-flex items-center rounded-full bg-gray-200 text-gray-800 text-xs px-2.5 py-1">
+                      ⚙️ เกียร์:
+                      <span className="ml-1 font-medium">{transmission}</span>
+                    </span>
+                  )}
+                  {fuel && (
+                    <span className="inline-flex items-center rounded-full bg-gray-200 text-gray-800 text-xs px-2.5 py-1">
+                      ⛽ เชื้อเพลิง:
+                      <span className="ml-1 font-medium">{fuel}</span>
+                    </span>
+                  )}
+                </div>
+              )}
+
               <p className="text-2xl font-semibold text-black mt-4 mb-6">
                 {fmtBaht(pricePerDay)} บาท/วัน
               </p>
@@ -281,10 +304,6 @@ export default function CarInfo() {
               <ul className="space-y-2 text-gray-800 mb-6">
                 {vehicle?.year && <li>ปี: {vehicle.year}</li>}
                 {vehicle?.seats && <li>จำนวนที่นั่ง: {vehicle.seats}</li>}
-                {vehicle?.transmission && (
-                  <li>ระบบเกียร์: {vehicle.transmission}</li>
-                )}
-                {vehicle?.fuel && <li>เชื้อเพลิง: {vehicle.fuel}</li>}
                 {vehicle?.plate_no && <li>ทะเบียน: {vehicle.plate_no}</li>}
               </ul>
 

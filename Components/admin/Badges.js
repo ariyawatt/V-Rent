@@ -1,51 +1,127 @@
 // components/admin/Badges.jsx
 import { cls } from "./utils";
 
-/** แปลง (TH -> EN) และ normalize ให้รับได้ทั้งไทย/อังกฤษ */
-const TH_EN_MAP = {
+/** ----- Dictionary ไทย <-> อังกฤษ (canonical = อังกฤษ) ----- */
+const EN_TH = {
   // Car status
-  ว่าง: "Available",
-  ถูกยืมอยู่: "In Use",
-  ซ่อมแซม: "Maintenance",
-  รอส่ง: "Pending Delivery",
-  เลยกำหนดรับ: "Pickup Overdue",
-  เลยกำหนดส่ง: "Return Overdue",
+  available: "ว่าง",
+  "in use": "ถูกยืมอยู่",
+  maintenance: "ซ่อมแซม",
+  "pending delivery": "รอส่ง",
+  "pickup overdue": "เลยกำหนดรับ",
+  "return overdue": "เลยกำหนดส่ง",
   // Booking status
-  ยืนยันแล้ว: "Confirmed",
-  รอรับ: "Waiting Pickup",
-  กำลังเช่า: "In Use",
-  เลยกำหนดคืน: "Return Overdue",
-  ยกเลิก: "Cancelled",
-  เสร็จสิ้น: "Completed",
-  // Payment status
-  ชำระแล้ว: "Paid",
-  รอชำระ: "Pending Payment",
+  confirmed: "ยืนยันแล้ว",
+  "waiting pickup": "รอรับ",
+  cancelled: "ยกเลิก",
+  completed: "เสร็จสิ้น",
+  // Payment status (ตัด pending payment ออก)
+  paid: "ชำระแล้ว",
 };
 
-const toEnglish = (v = "") => TH_EN_MAP[v] || v;
-const lc = (s = "") => s.toLowerCase();
-const isPendingPayment = (v = "") =>
-  ["รอชำระ", "pending payment", "pending", "unpaid"].includes(lc(toEnglish(v)));
+const TH_EN = {
+  // Car
+  ว่าง: "available",
+  ถูกยืมอยู่: "in use",
+  ซ่อมแซม: "maintenance",
+  รอส่ง: "pending delivery",
+  เลยกำหนดรับ: "pickup overdue",
+  เลยกำหนดส่ง: "return overdue",
+  // Booking
+  ยืนยันแล้ว: "confirmed",
+  รอรับ: "waiting pickup",
+  กำลังเช่า: "in use",
+  เลยกำหนดคืน: "return overdue",
+  ยกเลิก: "cancelled",
+  เสร็จสิ้น: "completed",
+  // Payment
+  ชำระแล้ว: "paid",
+  // ❌ ไม่มี "รอชำระ"
+};
+
+const lc = (s = "") => String(s).trim().toLowerCase().replace(/\s+/g, " ");
+const normalize = (s = "") => lc(s).replace(/[_-]+/g, " ");
+
+function canonical(raw = "") {
+  const x = normalize(raw);
+  if (TH_EN[x]) return TH_EN[x];
+  if (x === "rented") return "in use";
+  if (x === "overdue pickup") return "pickup overdue";
+  if (x === "overdue return") return "return overdue";
+  // คีย์ที่เราจะ “ตัดออก” ถ้ามาเป็นสถานะนี้
+  if (["pending payment", "pending", "unpaid"].includes(x))
+    return "pending payment";
+  return x;
+}
+
+function toEnglish(v = "") {
+  return canonical(v);
+}
+function toThai(v = "") {
+  const en = canonical(v);
+  return EN_TH[en] || v || "";
+}
+
+function isRemovedStatus(v = "") {
+  // ถ้ามีค่าเหล่านี้ ให้ “ไม่เรนเดอร์ป้าย” เพื่อเอาออกจาก UI
+  return canonical(v) === "pending payment";
+}
+
+function colorForStatus(en) {
+  switch (en) {
+    case "available":
+      return "bg-green-100 text-green-800";
+    case "in use":
+      return "bg-red-100 text-red-800";
+    case "maintenance":
+      return "bg-amber-100 text-amber-800";
+    case "pending delivery":
+      return "bg-blue-100 text-blue-800";
+    case "pickup overdue":
+      return "bg-orange-100 text-orange-800";
+    case "return overdue":
+      return "bg-rose-100 text-rose-800";
+    default:
+      return "bg-gray-100 text-gray-700";
+  }
+}
+function colorForBooking(en) {
+  switch (en) {
+    case "confirmed":
+    case "waiting pickup":
+      return "bg-emerald-100 text-emerald-800";
+    case "in use":
+      return "bg-indigo-100 text-indigo-800";
+    case "pickup overdue":
+    case "return overdue":
+      return "bg-rose-100 text-rose-800";
+    case "completed":
+      return "bg-sky-100 text-sky-800";
+    case "cancelled":
+      return "bg-gray-200 text-gray-700";
+    default:
+      return "bg-gray-100 text-gray-700";
+  }
+}
+function colorForPayment(en) {
+  switch (en) {
+    case "paid":
+      return "bg-emerald-100 text-emerald-800";
+    case "completed":
+      return "bg-sky-100 text-sky-800";
+    case "cancelled":
+      return "bg-gray-200 text-gray-700";
+    default:
+      return "bg-gray-100 text-gray-700";
+  }
+}
 
 /* -------------------- Car Status Badge -------------------- */
-export const StatusBadge = ({ value }) => {
+export const StatusBadge = ({ value, display = "th" }) => {
+  if (isRemovedStatus(value)) return null;
   const en = toEnglish(value);
-  const s = lc(en);
-
-  const color =
-    s === "available"
-      ? "bg-green-100 text-green-800"
-      : s === "in use" || s === "rented" || s === "in-use"
-      ? "bg-red-100 text-red-800"
-      : s === "maintenance"
-      ? "bg-amber-100 text-amber-800"
-      : s === "pending delivery"
-      ? "bg-blue-100 text-blue-800"
-      : s === "pickup overdue"
-      ? "bg-orange-100 text-orange-800"
-      : s === "return overdue"
-      ? "bg-rose-100 text-rose-800"
-      : "bg-gray-100 text-gray-700";
+  const label = display === "en" ? en : toThai(en);
+  const color = colorForStatus(en);
 
   return (
     <span
@@ -54,31 +130,17 @@ export const StatusBadge = ({ value }) => {
         color
       )}
     >
-      {en}
+      {label || "-"}
     </span>
   );
 };
 
 /* -------------------- Booking Badge -------------------- */
-export const BookingBadge = ({ value }) => {
-  // ซ่อนสถานะ Pending Payment
-  if (isPendingPayment(value)) return null;
-
+export const BookingBadge = ({ value, display = "th" }) => {
+  if (isRemovedStatus(value)) return null;
   const en = toEnglish(value);
-  const s = lc(en);
-
-  const color =
-    s === "confirmed" || s === "waiting pickup"
-      ? "bg-emerald-100 text-emerald-800"
-      : s === "in use" || s === "in-use"
-      ? "bg-indigo-100 text-indigo-800"
-      : s === "pickup overdue" || s === "return overdue"
-      ? "bg-rose-100 text-rose-800"
-      : s === "cancelled"
-      ? "bg-gray-200 text-gray-700"
-      : s === "completed"
-      ? "bg-sky-100 text-sky-800"
-      : "bg-gray-100 text-gray-700";
+  const label = display === "en" ? en : toThai(en);
+  const color = colorForBooking(en);
 
   return (
     <span
@@ -87,27 +149,17 @@ export const BookingBadge = ({ value }) => {
         color
       )}
     >
-      {en}
+      {label || "-"}
     </span>
   );
 };
 
 /* -------------------- Payment Badge -------------------- */
-export const PayBadge = ({ value }) => {
-  // ซ่อนสถานะ Pending Payment
-  if (isPendingPayment(value)) return null;
-
+export const PayBadge = ({ value, display = "th" }) => {
+  if (isRemovedStatus(value)) return null;
   const en = toEnglish(value);
-  const s = lc(en);
-
-  const color =
-    s === "paid"
-      ? "bg-emerald-100 text-emerald-800"
-      : s === "completed"
-      ? "bg-sky-100 text-sky-800"
-      : s === "cancelled"
-      ? "bg-gray-200 text-gray-700"
-      : "bg-gray-100 text-gray-700";
+  const label = display === "en" ? en : toThai(en);
+  const color = colorForPayment(en);
 
   return (
     <span
@@ -116,7 +168,7 @@ export const PayBadge = ({ value }) => {
         color
       )}
     >
-      {en}
+      {label || "-"}
     </span>
   );
 };
