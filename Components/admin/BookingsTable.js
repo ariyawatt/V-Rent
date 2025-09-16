@@ -429,7 +429,7 @@ function EditModal({ open, data, carOptions = [], onClose, onSaved }) {
       fd.append("discount", String(form.discount ?? 0));
       fd.append("down_payment", "0");
       fd.append("contact_platform", form.channel || "");
-      fd.append("additional_options", String(form.addon ?? ""));
+      fd.append("additional_options", String(form.addon ?? "")); // ถ้าเป็นจำนวน ให้เปลี่ยน key ตาม backend
       fd.append("remark", form.note || "");
       const days = computeDays(form.pickupTime, form.returnTime);
       const total =
@@ -461,7 +461,6 @@ function EditModal({ open, data, carOptions = [], onClose, onSaved }) {
 
       onSaved?.({ ...form, total });
       onClose?.();
-      // ❌ ไม่ reload หน้า
     } catch (e) {
       setErr(String(e?.message || e));
     } finally {
@@ -998,10 +997,8 @@ export default function BookingsTable({
         payment: "Paid",
       });
 
-      // แจ้ง parent ถ้ามี
       onComplete?.(b);
 
-      // อัปเดตในตาราง (เมื่อใช้ remoteRows)
       if (!(Array.isArray(bookings) && bookings.length > 0)) {
         setRemoteRows((prev) =>
           prev.map((r) =>
@@ -1025,10 +1022,10 @@ export default function BookingsTable({
       if (!ok) return;
       setCancellingId(b.bookingCode);
 
-      // ใช้ API ใหม่ตามที่กำหนด
+      // ✅ Push สถานะ "Cancelled" ไป DB
       await apiEditRentalStatus(b.bookingCode, "Cancelled");
 
-      // อัปเดตในตารางให้แสดง "ยกเลิก" ทั้งคอลัมน์ชำระเงินและสถานะ
+      // ✅ อัปเดตในตารางทันที
       if (!(Array.isArray(bookings) && bookings.length > 0)) {
         setRemoteRows((prev) =>
           prev.map((r) =>
@@ -1048,6 +1045,26 @@ export default function BookingsTable({
   const handleDelete = async (b) => {
     try {
       if (!b?.bookingCode) return;
+
+      // ถ้ายังไม่ยกเลิก → ยกเลิกก่อนอัตโนมัติ เพื่อกัน constraint
+      if (String(b.bookingStatus || "").toLowerCase() !== "cancelled") {
+        try {
+          await apiEditRentalStatus(b.bookingCode, "Cancelled");
+          if (!(Array.isArray(bookings) && bookings.length > 0)) {
+            setRemoteRows((prev) =>
+              prev.map((r) =>
+                r.bookingCode === b.bookingCode
+                  ? { ...r, bookingStatus: "cancelled" }
+                  : r
+              )
+            );
+          }
+        } catch (e) {
+          // ถ้ายกเลิกไม่ผ่านก็ยังให้ผู้ใช้ลองลบได้ เผื่อ backend อนุญาต
+          console.warn("auto-cancel before delete failed:", e);
+        }
+      }
+
       const ok = confirm(`ยืนยันลบการจอง "${b.bookingCode}" หรือไม่?`);
       if (!ok) return;
 
@@ -1068,12 +1085,29 @@ export default function BookingsTable({
       );
 
       const text = await res.text();
-      if (!res.ok) throw new Error(text || "ลบไม่สำเร็จ");
+      if (!res.ok) {
+        // ถ้า backend ยังล็อก linkage อยู่ ลองยกเลิกอีกรอบแล้วลบซ้ำ
+        try {
+          await apiEditRentalStatus(b.bookingCode, "Cancelled");
+          const res2 = await fetch(
+            "https://demo.erpeazy.com/api/method/erpnext.api.delete_rental",
+            {
+              method: "DELETE",
+              headers,
+              body: JSON.stringify({ rental_id: b.bookingCode }),
+              credentials: "include",
+              redirect: "follow",
+            }
+          );
+          const text2 = await res2.text();
+          if (!res2.ok) throw new Error(text2 || text || "ลบไม่สำเร็จ");
+        } catch (e2) {
+          throw new Error(String(e2?.message || e2 || text || "ลบไม่สำเร็จ"));
+        }
+      }
 
-      // แจ้ง parent ถ้าคุม data ผ่าน props
       onDeleted?.(b);
 
-      // ถ้าใช้ remoteRows ภายใน ให้ลบทันที
       if (!(Array.isArray(bookings) && bookings.length > 0)) {
         setRemoteRows((prev) =>
           prev.filter(
@@ -1141,7 +1175,7 @@ export default function BookingsTable({
 
       {!loading && !err && (
         <>
-          {/* จอเล็ก: แบบการ์ด (ไม่ต้องเลื่อนซ้าย-ขวา) */}
+          {/* จอเล็ก: แบบการ์ด */}
           <div className="mt-4 md:hidden">
             <CompactList
               rows={filtered}
@@ -1156,7 +1190,7 @@ export default function BookingsTable({
             />
           </div>
 
-          {/* จอ md ขึ้นไป: ตารางพอดีหน้าต่าง ไม่มี min-width/overflow */}
+          {/* จอ md+: ตารางพอดีหน้าต่าง */}
           <div className="mt-4 hidden md:block">
             <table className="w-full table-auto text-sm">
               <thead>
@@ -1186,15 +1220,12 @@ export default function BookingsTable({
 
                   return (
                     <tr key={b.id} className="align-top">
-                      {/* รับ → คืน */}
                       <td className="py-3 pr-3 text-black break-words">
                         <div>{fmtDateTimeLocal(b.pickupTime)}</div>
                         <div className="text-xs text-gray-500">
                           → {fmtDateTimeLocal(b.returnTime)}
                         </div>
                       </td>
-
-                      {/* รหัส/ลูกค้า/รถ */}
                       <td className="py-3 pr-3 font-medium text-black break-words">
                         {b.bookingCode}
                       </td>
@@ -1208,7 +1239,6 @@ export default function BookingsTable({
                         {(b.carName || "—") + " / " + (b.carPlate || "—")}
                       </td>
 
-                      {/* ราคา/วัน / วันเช่า / รวมสุทธิ */}
                       <td className="py-3 pr-3 text-right text-black whitespace-nowrap font-mono tabular-nums hidden lg:table-cell">
                         {fmtBaht(b.pricePerDay)}&nbsp;฿
                       </td>
@@ -1219,7 +1249,6 @@ export default function BookingsTable({
                         {fmtBaht(total)}&nbsp;฿
                       </td>
 
-                      {/* ชำระ/สถานะ */}
                       <td className="py-3 pr-3 text-black">
                         {life === "cancelled" ? (
                           <BookingBadge value="cancelled" />
@@ -1231,7 +1260,6 @@ export default function BookingsTable({
                         <BookingBadge value={life} />
                       </td>
 
-                      {/* การจัดการ */}
                       <td className="py-3 pr-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <button
