@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/FooterMinimal";
 
+// ปรับตรงนี้ถ้าเส้นทางจริงของโปรเจกต์คุณเป็น /admin หรือ /
+const ADMIN_PATH = "/adminpageT";
+const USER_PATH = "/mainpage";
+
 export default function Login() {
   const router = useRouter();
 
@@ -17,15 +21,16 @@ export default function Login() {
 
   useEffect(() => {
     // เติมอีเมลที่เคยจำไว้ (ถ้ามี)
-    const savedEmail = localStorage.getItem("vrent_login_email") || "";
-    const savedRemember = localStorage.getItem("vrent_remember") === "1";
-    if (savedEmail) setEmail(savedEmail);
-    if (savedRemember) setRemember(true);
+    try {
+      const savedEmail = localStorage.getItem("vrent_login_email") || "";
+      const savedRemember = localStorage.getItem("vrent_remember") === "1";
+      if (savedEmail) setEmail(savedEmail);
+      if (savedRemember) setRemember(true);
+    } catch {}
   }, []);
 
   /* ---------------- Helpers: user info & admin check ---------------- */
   const getUserInformation = async (userId) => {
-    // ใช้รูปแบบที่คุณให้มา แต่ใส่ user_id ทาง query และให้เบราว์เซอร์ส่งคุกกี้เอง
     const url = new URL(
       "https://demo.erpeazy.com/api/method/erpnext.api.get_user_information"
     );
@@ -34,6 +39,9 @@ export default function Login() {
       method: "GET",
       credentials: "include",
       redirect: "follow",
+      headers: {
+        Accept: "application/json",
+      },
     });
     const txt = await r.text();
     let json;
@@ -78,13 +86,14 @@ export default function Login() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
-        // สำคัญ: ให้บราวเซอร์จัดการคุกกี้เอง (ตั้ง Cookie header เองไม่ได้)
+        // ให้บราวเซอร์จัดการคุกกี้เอง
         credentials: "include",
         redirect: "follow",
         body: JSON.stringify({
-          usr: email, // กรอกในฟอร์ม เช่น "administrator" หรืออีเมล
-          pwd: password, // กรอกในฟอร์ม เช่น "ZAQ!@WSX"
+          usr: email, // เช่น "administrator" หรืออีเมล
+          pwd: password, // เช่น "ZAQ!@WSX"
         }),
       });
 
@@ -97,7 +106,6 @@ export default function Login() {
       }
 
       if (!res.ok) {
-        // พยายามดึง message จาก response ถ้ามี
         const msg =
           data?.message ||
           data?.exc ||
@@ -109,16 +117,17 @@ export default function Login() {
       }
 
       // จำอีเมลไว้ตามที่ผู้ใช้เลือก
-      if (remember) {
-        localStorage.setItem("vrent_login_email", email);
-        localStorage.setItem("vrent_remember", "1");
-      } else {
-        localStorage.removeItem("vrent_login_email");
-        localStorage.removeItem("vrent_remember");
-      }
+      try {
+        if (remember) {
+          localStorage.setItem("vrent_login_email", email);
+          localStorage.setItem("vrent_remember", "1");
+        } else {
+          localStorage.removeItem("vrent_login_email");
+          localStorage.removeItem("vrent_remember");
+        }
+      } catch {}
 
-      // ใช้ user_id = email/username ที่ใช้ล็อกอิน ไปเช็คสิทธิ์ผ่าน get_user_information
-      // (เลี่ยงการเรียก method ที่ไม่ whitelist)
+      // ตรวจสิทธิ์จากข้อมูลผู้ใช้
       const info = await getUserInformation(email);
       const isAdmin = isAdminFromInfo(email, info);
       console.log("Check if user was admin return true =>", isAdmin);
@@ -129,8 +138,8 @@ export default function Login() {
         localStorage.setItem("vrent_user_id", String(email || ""));
       } catch {}
 
-      // สำเร็จ — ไปหน้าแอดมินหรือหน้าผู้ใช้ตามสิทธิ์
-      router.push(isAdmin ? "/adminpage" : "/mainpage");
+      // ไปหน้าแอดมินหรือผู้ใช้ตามสิทธิ์
+      router.push(isAdmin ? ADMIN_PATH : USER_PATH);
     } catch (err) {
       console.error(err);
       setErrMsg(err?.message || "เกิดข้อผิดพลาดในการเข้าสู่ระบบ");
@@ -182,6 +191,7 @@ export default function Login() {
                   viewBox="0 0 24 24"
                   fill="none"
                   className="text-white"
+                  aria-hidden="true"
                 >
                   <path
                     d="M3 4L12 20L21 4"
@@ -217,6 +227,7 @@ export default function Login() {
                         height="18"
                         viewBox="0 0 24 24"
                         fill="none"
+                        aria-hidden="true"
                       >
                         <path
                           d="M3 7.5 12 13l9-5.5"
@@ -241,6 +252,7 @@ export default function Login() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="administrator หรือ you@domain.com"
+                      autoComplete="username"
                       className="w-full rounded-xl border border-white/10 bg-[#0F1530]/60 px-10 py-3 text-sm placeholder:text-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
                     />
                   </div>
@@ -258,6 +270,7 @@ export default function Login() {
                         height="18"
                         viewBox="0 0 24 24"
                         fill="none"
+                        aria-hidden="true"
                       >
                         <rect
                           x="4"
@@ -282,6 +295,7 @@ export default function Login() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
+                      autoComplete="current-password"
                       className="w-full rounded-xl border border-white/10 bg-[#0F1530]/60 px-10 py-3 text-sm placeholder:text-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
                     />
                     <button
@@ -296,6 +310,7 @@ export default function Login() {
                           height="18"
                           viewBox="0 0 24 24"
                           fill="none"
+                          aria-hidden="true"
                         >
                           <path
                             d="M3 3l18 18"
@@ -315,6 +330,7 @@ export default function Login() {
                           height="18"
                           viewBox="0 0 24 24"
                           fill="none"
+                          aria-hidden="true"
                         >
                           <path
                             d="M21 12s-3.5 6-9 6-9-6-9-6 3.5-6 9-6 9 6 9 6Z"
@@ -379,7 +395,7 @@ export default function Login() {
                 <div className="h-px flex-1 bg-white/10" />
               </div>
 
-              {/* OAuth buttons */}
+              {/* OAuth buttons (ยังไม่ผูกจริง) */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button
                   type="button"
@@ -391,6 +407,7 @@ export default function Login() {
                     viewBox="0 0 533.5 544.3"
                     width="20"
                     height="20"
+                    aria-hidden="true"
                   >
                     <path
                       fill="#4285f4"
@@ -416,15 +433,16 @@ export default function Login() {
                   type="button"
                   className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm hover:bg-white/10"
                 >
-                  {/* Facebook logo */}
+                  {/* Facebook logo (fixed path) */}
                   <svg
                     width="18"
                     height="18"
                     viewBox="0 0 24 24"
                     fill="currentColor"
                     xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
                   >
-                    <path d="M22.675 0h-21.35C.595 0 0 .6 0 1.326v21.348C0 23.405.595 24 1.325 24H12.82v-9.294H9.692v-3.622h3.128V8.413c0-3.1 1.894-4.788 4.659-4.788 1.325 0 2.464.099 2.795.143v3.24l-1.918.001c-1.505 0-1.797.716-1.797 1.767v2.318h3.59ล-.467 3.622h-3.123V24h6.116C23.405 24 24 23.405 24 22.674V1.326C24 .6 23.405 0 22.675 0z" />
+                    <path d="M22.675 0h-21.35C.595 0 0 .6 0 1.326v21.348C0 23.405.595 24 1.325 24H12.82v-9.294H9.692v-3.622h3.128V8.413c0-3.1 1.894-4.788 4.659-4.788 1.325 0 2.464.099 2.795.143v3.24l-1.918.001c-1.505 0-1.797.716-1.797 1.767v2.318h3.59l-.467 3.622h-3.123V24h6.116C23.405 24 24 23.405 24 22.674V1.326C24 .6 23.405 0 22.675 0z" />
                   </svg>
                   Facebook
                 </button>

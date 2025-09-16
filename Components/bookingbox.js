@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 const carTypeToFType = {
   any: undefined,
@@ -12,7 +13,7 @@ const carTypeToFType = {
   van: "VAN",
 };
 
-// รวม date + time เป็น ISO (ตามเวลาท้องถิ่นผู้ใช้)
+// รวม date + time เป็น ISO (ตามเวลาท้องถิ่นผู้ใช้) → คืนค่าเป็น ISO string (UTC)
 function toLocalISO(dateStr, timeStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
   const [hh = 0, mm = 0] = (timeStr || "00:00").split(":").map(Number);
@@ -21,6 +22,8 @@ function toLocalISO(dateStr, timeStr) {
 }
 
 export default function BookingBox({ onSearch }) {
+  const router = useRouter();
+
   const [form, setForm] = useState({
     pickupLocation: "",
     returnSame: true,
@@ -78,33 +81,48 @@ export default function BookingBox({ onSearch }) {
       return;
     }
 
-    // 3) เตรียม payload สำหรับ backend / ERP
+    // 3) เตรียม payload สำหรับ backend / ERP และหน้าแสดงรถ (CarBox)
     const payload = {
-      // ฟิลด์จาก UI
       pickup_location: form.pickupLocation,
       dropoff_location: form.returnSame
         ? form.pickupLocation
         : form.dropoffLocation || "",
-      pickup_at: pickupISO, // ISO string
-      return_at: returnISO, // ISO string
+      pickup_at: pickupISO,
+      return_at: returnISO,
       passengers: Number(form.passengers) || 1,
       promo: form.promo?.trim() || "",
-
-      // แม็ป carType → ftype (ถ้า any จะไม่ส่ง ftype)
       ...(carTypeToFType[form.carType]
         ? { ftype: carTypeToFType[form.carType] }
         : {}),
-
-      // เก็บค่าดิบไว้ด้วย เผื่อฝั่งผลลัพธ์อยากใช้
+      // เก็บค่าดิบไว้ด้วย
       _raw: { ...form },
     };
 
-    // 4) ยิงออกไปให้ผู้ปกครอง (Home) จัดการ fetch
+    // สร้าง query สำหรับหน้า /cars (CarBox อ่านได้ครบ)
+    const q = new URLSearchParams();
+    // พารามิเตอร์หลักที่ CarBox ใช้
+    if (payload.pickup_at) q.set("pickup_at", payload.pickup_at);
+    if (payload.return_at) q.set("return_at", payload.return_at);
+    if (payload.passengers) q.set("passengers", String(payload.passengers));
+    if (payload.promo) q.set("promo", payload.promo);
+    if (payload.ftype) q.set("ftype", payload.ftype);
+
+    // ส่งค่าเกี่ยวกับสถานที่/นโยบายคืนจุดเดิมไปด้วย (CarBox รองรับ)
+    q.set("pickupLocation", form.pickupLocation);
+    if (!form.returnSame && form.dropoffLocation) {
+      q.set("dropoffLocation", form.dropoffLocation);
+    }
+    q.set("returnSame", String(form.returnSame));
+
     try {
+      // เรียก onSearch ให้หน้าแม่ใช้งานต่อ (เช่น เก็บ state หรือยิง API อื่น)
       onSearch?.(payload);
     } catch (err) {
       console.error("onSearch error:", err);
     }
+
+    // ✅ นำไปยังหน้ารายการรถ (CarBox) ที่ /cars พร้อม query
+    router.push(`/cars?${q.toString()}`);
 
     console.log("Booking search payload:", payload);
   };

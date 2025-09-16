@@ -60,6 +60,9 @@ export default function DeliveriesTable() {
   const [q, setQ] = useState("");
   const [date, setDate] = useState(""); // YYYY-MM-DD
 
+  // deleting state
+  const [deletingId, setDeletingId] = useState(""); // เก็บ dlv_id ที่กำลังลบ
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -175,10 +178,13 @@ export default function DeliveriesTable() {
           );
 
           return {
-            // ตาราง
+            // คีย์ภายใน
             id: rec?.name || rec?.id || "-",
+            // ใช้ค่านี้เป็น dlv_id ในการลบ (fallback เป็น id)
             deliveryCode:
               rec?.delivery_code || rec?.dlv_code || rec?.name || "-",
+
+            // ตาราง
             bookingCode:
               rec?.booking_code ||
               rec?.booking ||
@@ -267,6 +273,72 @@ export default function DeliveriesTable() {
     };
   }, [open]);
 
+  /* ===== Delete Handler ===== */
+  const handleDelete = async (row) => {
+    const dlvId =
+      row?.deliveryCode && row.deliveryCode !== "-"
+        ? row.deliveryCode
+        : row?.id;
+
+    if (!dlvId) {
+      setErr("ไม่พบรหัสส่งมอบ (dlv_id) สำหรับการลบ");
+      return;
+    }
+
+    const ok = window.confirm(
+      `ยืนยันลบรายการส่งมอบ ${dlvId} ?\nการลบจะไม่สามารถย้อนกลับได้`
+    );
+    if (!ok) return;
+
+    setErr("");
+    setDeletingId(dlvId);
+    try {
+      const headers = new Headers();
+      headers.append("Content-Type", "application/json");
+
+      const res = await fetch(
+        "https://demo.erpeazy.com/api/method/erpnext.api.delete_dlv",
+        {
+          method: "DELETE",
+          headers,
+          credentials: "include",
+          body: JSON.stringify({ dlv_id: dlvId }),
+          redirect: "follow",
+        }
+      );
+
+      const text = await res.text();
+      // พยายาม parse เผื่อ backend ส่ง json กลับ
+      let payload = null;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        /* not json, ignore */
+      }
+
+      if (!res.ok) {
+        // ถ้า backend ส่งข้อความ error มากับ body
+        const msg =
+          payload?.message || payload?.exc || text || "ลบไม่สำเร็จ (unknown)";
+        throw new Error(msg);
+      }
+
+      // ลบสำเร็จ → เอาออกจาก state
+      setRows((prev) =>
+        prev.filter((r) => {
+          const idCompare =
+            r.deliveryCode && r.deliveryCode !== "-" ? r.deliveryCode : r.id;
+          return idCompare !== dlvId;
+        })
+      );
+    } catch (e) {
+      console.error(e);
+      setErr(`ลบไม่สำเร็จ: ${String(e.message || e)}`);
+    } finally {
+      setDeletingId("");
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
       {/* header */}
@@ -334,64 +406,88 @@ export default function DeliveriesTable() {
             </thead>
 
             <tbody className="divide-y divide-gray-100 text-black">
-              {filtered.map((d) => (
-                <tr key={d.id} className="align-top">
-                  <td className="py-3 pr-4 whitespace-nowrap">
-                    <div className="font-medium">
-                      {d.pickupTime ? fmtDateTimeLocal(d.pickupTime) : "-"}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      บันทึก: {d.loggedAt ? fmtDateTimeLocal(d.loggedAt) : "-"}
-                    </div>
-                  </td>
-                  <td className="py-3 pr-4">
-                    <div className="font-semibold text-black">
-                      {d.deliveryCode}
-                    </div>
-                  </td>
-                  <td className="py-3 pr-4">
-                    <div className="font-medium">{d.bookingCode}</div>
-                  </td>
-                  <td className="py-3 pr-4">
-                    <div className="font-medium">{d.customerName}</div>
-                    {d.customerPhone && (
-                      <div className="text-xs text-gray-600 mt-0.5">
-                        {d.customerPhone}
+              {filtered.map((d) => {
+                const dlvId =
+                  d.deliveryCode && d.deliveryCode !== "-"
+                    ? d.deliveryCode
+                    : d.id;
+                const isDeleting = deletingId === dlvId;
+
+                return (
+                  <tr key={`${d.id}-${dlvId}`} className="align-top">
+                    <td className="py-3 pr-4 whitespace-nowrap">
+                      <div className="font-medium">
+                        {d.pickupTime ? fmtDateTimeLocal(d.pickupTime) : "-"}
                       </div>
-                    )}
-                  </td>
-                  <td className="py-3 pr-4">
-                    <div className="font-medium">{d.carName}</div>
-                    {d.carPlate && (
-                      <div className="text-xs text-gray-600 mt-0.5">
-                        {d.carPlate}
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        บันทึก:{" "}
+                        {d.loggedAt ? fmtDateTimeLocal(d.loggedAt) : "-"}
                       </div>
-                    )}
-                  </td>
-                  <td className="py-3 pr-4">
-                    <div className="font-medium">{d.pickupLocation}</div>
-                  </td>
-                  <td className="py-3 pr-4">
-                    <div className="font-medium">{d.staff}</div>
-                  </td>
-                  <td className="py-3 pr-4 whitespace-nowrap">
-                    <div className="font-medium">
-                      ID: {d.idImgCount} / CAR: {d.carImgCount}
-                    </div>
-                  </td>
-                  <td className="py-3 pr-2">
-                    <button
-                      onClick={() => {
-                        setSelected(d);
-                        setOpen(true);
-                      }}
-                      className="rounded-lg border border-gray-300 bg-gray-200 px-3 py-1.5 text-black hover:bg-gray-300"
-                    >
-                      เปิดดู
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="py-3 pr-4">
+                      <div className="font-semibold text-black">
+                        {d.deliveryCode}
+                      </div>
+                    </td>
+                    <td className="py-3 pr-4">
+                      <div className="font-medium">{d.bookingCode}</div>
+                    </td>
+                    <td className="py-3 pr-4">
+                      <div className="font-medium">{d.customerName}</div>
+                      {d.customerPhone && (
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          {d.customerPhone}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 pr-4">
+                      <div className="font-medium">{d.carName}</div>
+                      {d.carPlate && (
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          {d.carPlate}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 pr-4">
+                      <div className="font-medium">{d.pickupLocation}</div>
+                    </td>
+                    <td className="py-3 pr-4">
+                      <div className="font-medium">{d.staff}</div>
+                    </td>
+                    <td className="py-3 pr-4 whitespace-nowrap">
+                      <div className="font-medium">
+                        ID: {d.idImgCount} / CAR: {d.carImgCount}
+                      </div>
+                    </td>
+                    <td className="py-3 pr-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setSelected(d);
+                            setOpen(true);
+                          }}
+                          className="rounded-lg border border-gray-300 bg-gray-200 px-3 py-1.5 text-black hover:bg-gray-300"
+                        >
+                          เปิดดู
+                        </button>
+
+                        <button
+                          onClick={() => handleDelete(d)}
+                          disabled={isDeleting}
+                          className={`rounded-lg border border-gray-300 px-3 py-1.5 ${
+                            isDeleting
+                              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                              : "bg-gray-200 text-black hover:bg-gray-300"
+                          }`}
+                          title="ลบรายการส่งมอบนี้"
+                        >
+                          {isDeleting ? "กำลังลบ…" : "ลบ"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
 
               {!filtered.length && (
                 <tr>
@@ -417,7 +513,10 @@ export default function DeliveriesTable() {
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <div className="relative bg-white w-[min(980px,92vw)] max-h-[90vh] rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+          <div
+            className="relative bg-white w>[min(980px,92vw)] max-h-[90vh] rounded-2xl shadow-xl border border-gray-200 overflow-hidden"
+            style={{ width: "min(980px,92vw)" }}
+          >
             {/* header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-black">

@@ -72,7 +72,7 @@ export default function Home() {
     );
 
     // ไปหน้าเลือกคันก่อน (CarBox). ค่าใน params จะถูกพกต่อไปยัง /cars/[id] และ /booking
-    router.push(`/carbox?${params.toString()}`);
+    router.push(`/cars?${params.toString()}`);
   };
 
   return (

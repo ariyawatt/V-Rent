@@ -1,55 +1,63 @@
-// app/api/vehicles/route.js  (หรือ src/app/api/vehicles/route.js)
-export const runtime = "nodejs";
+// app/api/vehicles/route.js
+import { NextResponse } from "next/server";
 
-// CORS preflight (ถ้าคลientบางตัวยิง OPTIONS มาก่อน)
-export async function OPTIONS() {
-  return new Response(null, { status: 204 });
-}
+const ERP_BASE = process.env.NEXT_PUBLIC_ERP_BASE || "https://demo.erpeazy.com";
 
-// ทดสอบ GET ง่าย ๆ (เปิดในเบราว์เซอร์จะขึ้น 200)
-export async function GET() {
-  return Response.json({
-    ok: true,
-    hint: "POST to this endpoint with your payload",
-  });
-}
+// เปลี่ยนเป็น endpoint ที่คุณใช้จริงได้
+const ERP_SEARCH_URL = `${ERP_BASE}/api/method/erpnext.api.search_available_vehicles`;
+const ERP_ADMIN_LIST_URL = `${ERP_BASE}/api/method/erpnext.api.get_vehicles_admin`;
 
 export async function POST(req) {
+  let payload = {};
   try {
-    const payload = await req.json();
+    payload = await req.json();
+  } catch {}
 
-    // ถ้า ERP ต้องการ GET ให้สลับไปใช้บล็อก GET ด้านล่าง
-    const erpRes = await fetch(
-      "https://demo.erpeazy.com/api/method/erpnext.api.get_vehicles",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }
-    );
-
-    // Forward เนื้อหาเดิมกลับ (บางครั้ง ERP ตอบเป็น text)
-    const text = await erpRes.text();
-    return new Response(text, {
-      status: erpRes.status,
+  // 1) พยายามเรียก search (รองรับ body)
+  try {
+    const r = await fetch(ERP_SEARCH_URL, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
+      // ถ้า ERP ต้องใช้ session/cookie ให้ต่อ credentials ด้วย
+      credentials: "include",
+      body: JSON.stringify(payload),
     });
+    const t = await r.text();
+    let j;
+    try {
+      j = JSON.parse(t);
+    } catch {
+      j = { raw: t };
+    }
 
-    /*  // ← ใช้กรณี ERP รองรับ "GET ?query=params" เท่านั้น
-    const url = new URL("https://demo.erpeazy.com/api/method/erpnext.api.get_vehicles");
-    Object.entries(payload || {}).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && String(v).trim() !== "") {
-        url.searchParams.set(k, String(v));
-      }
-    });
-    const erpRes = await fetch(url, { method: "GET" });
-    const text = await erpRes.text();
-    return new Response(text, { status: erpRes.status, headers: { "Content-Type": "application/json" } });
-    */
+    if (r.ok && (j?.message || Array.isArray(j))) {
+      return NextResponse.json(j);
+    }
+    // ถ้า search ไม่โอเค ไป fallback ต่อ
+    console.warn("search_available_vehicles failed; fallback", j);
   } catch (e) {
-    return Response.json(
-      { message: "proxy error", error: String(e) },
-      { status: 500 }
-    );
+    console.warn("search_available_vehicles error; fallback", e);
+  }
+
+  // 2) fallback: ดึงรายการรถ admin (GET)
+  try {
+    const r2 = await fetch(ERP_ADMIN_LIST_URL, {
+      method: "GET",
+      credentials: "include",
+    });
+    const t2 = await r2.text();
+    let j2;
+    try {
+      j2 = JSON.parse(t2);
+    } catch {
+      j2 = { raw: t2 };
+    }
+
+    if (!r2.ok) {
+      return new NextResponse(t2, { status: r2.status });
+    }
+    return NextResponse.json(j2);
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }
