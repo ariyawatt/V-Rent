@@ -34,3 +34,29 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+
+
+# How to Deploy (open terminal)
+
+1. login
+```
+gcloud init
+```
+
+2. สร้างและ Push Docker Image
+```
+docker buildx build --platform linux/amd64 \
+-t asia-southeast1-docker.pkg.dev/v-rent-472314/v-rent/v-rent:latest \
+--push .
+```
+
+3. Deploy บน Cloud Run
+```
+gcloud run deploy v-rent-app \
+--image asia-southeast1-docker.pkg.dev/v-rent-472314/v-rent/v-rent:latest \
+--platform managed \
+--region asia-southeast1 \
+--allow-unauthenticated
+```
