@@ -40,6 +40,8 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 # How to Deploy (open terminal)
 
+0. instal gcloud ก่อนไอหำ
+
 1. login
 ```
 gcloud init
