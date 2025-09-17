@@ -10,6 +10,8 @@ const ERP_AUTH = process.env.NEXT_PUBLIC_ERP_AUTH || ""; // ถ้ามี toke
 // ต้องการให้เมื่อสถานะการจอง = "in use" → รถ = "ถูกยืมอยู่"
 const VEHICLE_STAGE_BORROWED = "Maintenance"; // หรือ "In Use" ตามที่ ERP ต้องการ
 
+const VEHICLE_STAGE_COMPLETED = "Maintenance";
+
 // แปลง path ให้เป็น URL เต็ม
 function normalizeFileUrl(u) {
   if (!u) return "";
@@ -1214,15 +1216,18 @@ export default function BookingsTable({
   const handleComplete = async (b) => {
     try {
       if (!b?.bookingCode) return;
-      setCompletingId(b.bookingCode);
-      await apiUpdateStatus({
-        rid: b.bookingCode,
-        status: "Completed",
-        payment: "Paid",
-      });
 
+      // mark ว่ากำลังทำงาน (เอาไว้ disable ปุ่ม)
+      setCompletingId(b.bookingCode);
+
+      // ✅ อัปเดตสถานะการจองใน ERP → Completed
+      // ใช้ API เฉพาะเปลี่ยน status ไม่ต้องส่ง field อื่น
+      await apiEditRentalStatus(b.bookingCode, "Completed");
+
+      // แจ้ง parent callback ถ้ามี
       onComplete?.(b);
 
+      // ✅ อัปเดตใน state local ด้วย (ให้ UI เปลี่ยนเป็น Completed + Paid)
       if (!(Array.isArray(bookings) && bookings.length > 0)) {
         setRemoteRows((prev) =>
           prev.map((r) =>
@@ -1235,6 +1240,7 @@ export default function BookingsTable({
     } catch (e) {
       alert("เกิดข้อผิดพลาด: " + (e?.message || e));
     } finally {
+      // clear flag
       setCompletingId("");
     }
   };
