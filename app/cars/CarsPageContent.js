@@ -25,6 +25,45 @@ const slugify = (v) =>
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "");
 
+// คืน true เฉพาะรถที่ "ว่าง"
+const isCarAvailable = (car) => {
+  // ธง boolean ที่บาง API ชอบส่งมา
+  if (typeof car.available === "boolean") return car.available;
+  if (typeof car.is_available === "boolean") return car.is_available;
+  if (typeof car.is_free === "boolean") return car.is_free;
+  if (typeof car.rented === "boolean") return !car.rented; // ถ้า rented = false → ว่าง
+  if (typeof car.is_busy === "boolean") return !car.is_busy;
+
+  // สถานะเป็นข้อความ
+  const raw =
+    car.status ??
+    car.vehicle_status ??
+    car.stage ??
+    car.state ??
+    car.stage_code ??
+    car.availability ??
+    "";
+  const s = String(raw).trim().toLowerCase();
+
+  // รองรับทั้ง EN/TH
+  if (["available", "ว่าง"].includes(s)) return true;
+  if (
+    [
+      "in use",
+      "borrowed",
+      "maintenance",
+      "busy",
+      "unavailable",
+      "ถูกยืมอยู่",
+      "ซ่อมแซม",
+    ].includes(s)
+  )
+    return false;
+
+  // ถ้าไม่รู้จริง ๆ ว่าสถานะอะไร → ไม่แสดง (เข้มงวดตามที่ขอ)
+  return false;
+};
+
 export default function CarsPageContent() {
   const search = useSearchParams();
 
@@ -76,11 +115,12 @@ export default function CarsPageContent() {
           ? data
           : [];
 
-        // ✅ กรองที่ฝั่ง client ตาม ftype ที่ผู้ใช้เลือก
+        // 1) กรองเฉพาะรถที่ว่าง
+        const onlyAvailable = rawCars.filter(isCarAvailable);
+        // 2) ถ้ามีเลือกประเภท เพิ่มกรองซ้ำ
         const filtered = !selectedFtype
-          ? rawCars
-          : rawCars.filter((car) => {
-              // รองรับหลายคีย์ที่ backend อาจส่งมา: ftype | type | v_type
+          ? onlyAvailable
+          : onlyAvailable.filter((car) => {
               const carType = norm(car.ftype ?? car.type ?? car.v_type);
               return carType === selectedFtype;
             });

@@ -3,6 +3,14 @@
 
 import { useEffect, useState } from "react";
 
+/** ================== ERP CONFIG ================== */
+const ERP_BASE = process.env.NEXT_PUBLIC_ERP_BASE || "https://demo.erpeazy.com";
+const RENTAL_ENDPOINTS = [
+  "/api/method/erpnext.api.get_rentals_today",
+  "/api/method/erpnext.api.get_rentals_overall",
+  "/api/method/erpnext.api.get_rentals",
+];
+
 export default function EmployeeCard({ userId = "" }) {
   const [employee, setEmployee] = useState({
     id: "-",
@@ -16,11 +24,14 @@ export default function EmployeeCard({ userId = "" }) {
     startDate: "-",
     lastLogin: "-",
   });
+
   const [todaySummary, setTodaySummary] = useState({
-    pickups: 0,
-    returns: 0,
-    pendingPay: 0,
+    pickups: 0, // ต้องนำส่งวันนี้
+    pickupsDone: 0, // นำส่งแล้ว
+    returns: 0, // ต้องรับคืนวันนี้
+    returnsDone: 0, // ส่งมอบแล้ว
   });
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -44,50 +55,42 @@ export default function EmployeeCard({ userId = "" }) {
           return;
         }
 
-        const url = new URL(
-          "https://demo.erpeazy.com/api/method/erpnext.api.get_admin"
-        );
-        url.searchParams.set("user_id", effectiveUserId);
+        /** 1) ข้อมูลพนักงาน */
+        const u = new URL(`${ERP_BASE}/api/method/erpnext.api.get_admin`);
+        u.searchParams.set("user_id", effectiveUserId);
 
-        const res = await fetch(url.toString(), {
+        const resEmp = await fetch(u.toString(), {
           method: "GET",
           credentials: "include",
           signal: controller.signal,
         });
-
-        if (!res.ok) {
-          if (res.status === 403)
+        if (!resEmp.ok) {
+          if (resEmp.status === 403)
             throw new Error("คุณไม่มีสิทธิ์ดึงข้อมูลพนักงาน (403)");
-          throw new Error(`เกิดข้อผิดพลาด (HTTP ${res.status})`);
+          throw new Error(`เกิดข้อผิดพลาด (HTTP ${resEmp.status})`);
         }
-
-        const json = await res.json();
-        const msg = json?.message;
-
-        // ⭐ รองรับได้ทั้ง object และ array
+        const empJson = await resEmp.json();
+        const msg = empJson?.message;
         let mapped = {};
         if (Array.isArray(msg)) {
-          // จากรูปใน Network:
-          // ["Administrator", null, "Bankok", "Normal", "2023-05-22", "2025-09-14 19:41:03.277131", "Administrator"]
           const [
             full_name,
             phone,
             branch,
-            status, // ค่าที่เห็นคือ "Normal"
+            status,
             start_date,
             last_login,
             role,
           ] = msg;
-
           mapped = {
-            id: "-", // ไม่มีใน array นี้
+            id: "-",
             name: full_name ?? "-",
             role: role ?? "-",
             status: status ?? "-",
             phone: phone ?? "-",
-            email: effectiveUserId, // ใช้อีเมลที่ล็อกอินแสดงแทน
+            email: effectiveUserId,
             branch: branch ?? "-",
-            shift: "-", // ไม่มีในผลลัพธ์นี้
+            shift: "-",
             startDate: start_date ?? "-",
             lastLogin: last_login ?? "-",
           };
@@ -105,22 +108,124 @@ export default function EmployeeCard({ userId = "" }) {
             lastLogin: msg.last_login || msg.lastLogin || "-",
           };
         } else {
-          throw new Error("รูปแบบข้อมูลไม่ถูกต้อง");
+          throw new Error("รูปแบบข้อมูลพนักงานไม่ถูกต้อง");
         }
-
         setEmployee(mapped);
 
-        // สรุปวันนี้ (ถ้ายังไม่มีให้เป็นศูนย์ไปก่อน)
-        const sum = (msg && msg.summary) || {};
-        setTodaySummary({
-          pickups: Number(sum.pickups ?? sum.pickups_today ?? 0),
-          returns: Number(sum.returns ?? sum.returns_today ?? 0),
-          pendingPay: Number(sum.pending_pay ?? sum.pendingPay ?? 0),
-        });
+        /** 2) ดึงงานวันนี้ (ลองหลาย endpoint) */
+        const today = new Date();
+        const y = today.getFullYear();
+        const m = String(today.getMonth() + 1).padStart(2, "0");
+        const d = String(today.getDate()).padStart(2, "0");
+        const ymd = `${y}-${m}-${d}`;
+
+        let bookingsRaw = null;
+        let summaryFromApi = null;
+
+        for (const path of RENTAL_ENDPOINTS) {
+          try {
+            const url = new URL(`${ERP_BASE}${path}`);
+            url.searchParams.set("date", ymd);
+            url.searchParams.set("from_date", ymd);
+            url.searchParams.set("to_date", ymd);
+
+            const r = await fetch(url.toString(), {
+              method: "GET",
+              credentials: "include",
+              signal: controller.signal,
+            });
+            if (!r.ok) continue;
+
+            const j = await r.json();
+            const payload = j?.message ?? j?.data ?? j?.result;
+
+            // (ก) ถ้า API ส่ง "ยอดรวม" มาเป็น object → ใช้เลย
+            const maybe = extractCounts(payload);
+            if (maybe) {
+              summaryFromApi = maybe;
+              break;
+            }
+
+            // (ข) ถ้าเป็นรายการ → เก็บไว้ไปคำนวณต่อ
+            if (Array.isArray(payload)) {
+              bookingsRaw = payload;
+              break;
+            }
+          } catch {
+            /* ลอง endpoint ถัดไป */
+          }
+        }
+
+        if (summaryFromApi) {
+          setTodaySummary(summaryFromApi);
+        } else {
+          const bookings = normalizeBookings(bookingsRaw || []);
+          const isToday = (dt) => {
+            if (!dt) return false;
+            const t = new Date(dt);
+            return (
+              t.getFullYear() === today.getFullYear() &&
+              t.getMonth() === today.getMonth() &&
+              t.getDate() === today.getDate()
+            );
+          };
+
+          const PICKED_KEYWORDS = [
+            "delivered",
+            "picked",
+            "picked_up",
+            "start",
+            "ongoing",
+            "in_use",
+            "success",
+            "done",
+            "complete",
+            "completed",
+          ];
+          const RETURNED_KEYWORDS = [
+            "returned",
+            "dropoff",
+            "handed_back",
+            "success",
+            "done",
+            "complete",
+            "completed",
+          ];
+          const isDelivered = (b) => {
+            const txt = `${b.deliveryStatus} ${b.status}`.toLowerCase();
+            return PICKED_KEYWORDS.some((k) => txt.includes(k));
+          };
+          const isReturned = (b) => {
+            const txt = `${b.returnStatus} ${b.status}`.toLowerCase();
+            return RETURNED_KEYWORDS.some((k) => txt.includes(k));
+          };
+          const isCanceled = (b) =>
+            /cancel/.test(String(b.status || "").toLowerCase());
+
+          const pickups = bookings.filter(
+            (b) => isToday(b.pickupTime) && !isCanceled(b)
+          );
+          const returns = bookings.filter(
+            (b) => isToday(b.returnTime) && !isCanceled(b)
+          );
+
+          setTodaySummary({
+            pickups: pickups.length,
+            pickupsDone: pickups.filter(isDelivered).length,
+            returns: returns.length,
+            returnsDone: returns.filter(isReturned).length,
+          });
+        }
       } catch (e) {
+        const msg = String(e?.message || "").toLowerCase();
+        const isAbort =
+          e?.name === "AbortError" ||
+          msg.includes("aborted without reason") ||
+          msg.includes("the user aborted a request");
+        if (isAbort) return;
         setError(e?.message || "โหลดข้อมูลไม่สำเร็จ");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     })();
 
@@ -172,19 +277,45 @@ export default function EmployeeCard({ userId = "" }) {
               </div>
             </div>
 
-            <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-lg border bg-gray-50 p-2">
-                <div className="text-xs text-gray-500">รับรถวันนี้</div>
-                <div className="text-lg font-bold">{todaySummary.pickups}</div>
+            {/* สรุปวันนี้ */}
+            <div className="mt-5 grid grid-cols-4 gap-3">
+              {/* ต้องนำส่ง \n วันนี้ */}
+              <div className="rounded-xl border bg-gray-50 p-4 sm:p-5 h-24 flex flex-col items-center justify-center">
+                <div className="text-xs text-gray-500 leading-tight whitespace-pre-line text-center">
+                  {"นำส่ง\nวันนี้"}
+                </div>
+                <div className="text-2xl font-bold leading-none py-2">
+                  {todaySummary.pickups}
+                </div>
               </div>
-              <div className="rounded-lg border bg-gray-50 p-2">
-                <div className="text-xs text-gray-500">คืนรถวันนี้</div>
-                <div className="text-lg font-bold">{todaySummary.returns}</div>
+
+              {/* นำส่งแล้ว */}
+              <div className="rounded-xl border bg-gray-50 p-4 sm:p-5 h-24 flex flex-col items-center justify-center">
+                <div className="text-xs text-gray-500 whitespace-nowrap text-center">
+                  นำส่งแล้ว
+                </div>
+                <div className="text-2xl font-bold leading-none py-2">
+                  {todaySummary.pickupsDone}
+                </div>
               </div>
-              <div className="rounded-lg border bg-gray-50 p-2">
-                <div className="text-xs text-gray-500">รอชำระ</div>
-                <div className="text-lg font-bold">
-                  {todaySummary.pendingPay}
+
+              {/* ต้องรับคืน \n วันนี้ */}
+              <div className="rounded-xl border bg-gray-50 p-4 sm:p-5 h-24 flex flex-col items-center justify-center">
+                <div className="text-xs text-gray-500 leading-tight whitespace-pre-line text-center">
+                  {"รับคืน\nวันนี้"}
+                </div>
+                <div className="text-2xl font-bold leading-none py-2">
+                  {todaySummary.returns}
+                </div>
+              </div>
+
+              {/* ส่งคืนแล้ว */}
+              <div className="rounded-xl border bg-gray-50 p-4 sm:p-5 h-24 flex flex-col items-center justify-center">
+                <div className="text-xs text-gray-500 whitespace-nowrap text-center">
+                  ส่งคืนแล้ว
+                </div>
+                <div className="text-2xl font-bold leading-none py-2">
+                  {todaySummary.returnsDone}
                 </div>
               </div>
             </div>
@@ -193,4 +324,160 @@ export default function EmployeeCard({ userId = "" }) {
       </div>
     </div>
   );
+}
+
+/* ---------------- helpers ---------------- */
+
+/** ดึงยอดจาก object รูปแบบต่าง ๆ (ถ้ามี) */
+function extractCounts(payload) {
+  if (!payload || Array.isArray(payload)) return null;
+
+  // เผื่ออยู่ข้างใน key อย่าง today / summary
+  const root =
+    typeof payload === "object" && (payload.today || payload.summary)
+      ? payload.today || payload.summary
+      : payload;
+
+  const num = (v) => (isFinite(v) ? Number(v) : 0);
+  const find = (obj, keys) => {
+    for (const k of keys) {
+      for (const cand of [k, k.toUpperCase(), k.toLowerCase()]) {
+        if (cand in obj && isFinite(obj[cand])) return num(obj[cand]);
+      }
+    }
+    // ลองไล่ 1 ชั้น
+    for (const v of Object.values(obj || {})) {
+      if (v && typeof v === "object") {
+        for (const k of keys) {
+          if (k in v && isFinite(v[k])) return num(v[k]);
+        }
+      }
+    }
+    return null;
+  };
+
+  const pickups =
+    find(root, [
+      "pickups",
+      "deliveries_due",
+      "to_deliver",
+      "to_pickup",
+      "today_pickups",
+    ]) ?? 0;
+  const pickupsDone =
+    find(root, ["pickups_done", "delivered", "delivered_today"]) ?? 0;
+  const returns =
+    find(root, [
+      "returns",
+      "dropoffs_due",
+      "to_return",
+      "today_returns",
+      "returns_today",
+    ]) ?? 0;
+  const returnsDone =
+    find(root, ["returns_done", "returned", "returned_today"]) ?? 0;
+
+  const total = pickups + pickupsDone + returns + returnsDone;
+  if (total === 0) return null; // ดูเหมือนไม่ใช่ payload แบบสรุป
+  return { pickups, pickupsDone, returns, returnsDone };
+}
+
+/** แปลงรายการเป็นรูปแบบกลาง */
+function normalizeBookings(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((v, i) => {
+    if (Array.isArray(v)) {
+      const [
+        code,
+        ,
+        pickup_time,
+        return_time,
+        status,
+        delivery_status,
+        return_status,
+      ] = v;
+      return {
+        id: String(code ?? i),
+        pickupTime: safeDate(pickup_time),
+        returnTime: safeDate(return_time),
+        status: String(status ?? "").toLowerCase(),
+        deliveryStatus: String(delivery_status ?? "").toLowerCase(),
+        returnStatus: String(return_status ?? "").toLowerCase(),
+      };
+    }
+    return {
+      id:
+        v.id || v.name || v.booking_id || v.booking_code || v.code || String(i),
+      pickupTime:
+        safeDate(
+          v.pickup_time ||
+            v.pickup_at ||
+            v.pickup_datetime ||
+            v.pickup_date ||
+            v.start ||
+            v.start_time ||
+            v.start_datetime
+        ) || null,
+      returnTime:
+        safeDate(
+          v.return_time ||
+            v.return_at ||
+            v.return_datetime ||
+            v.return_date ||
+            v.end ||
+            v.end_time ||
+            v.end_datetime
+        ) || null,
+      status: String(v.status || v.booking_status || "").toLowerCase(),
+      deliveryStatus: String(
+        v.delivery_status || v.pickup_status || ""
+      ).toLowerCase(),
+      returnStatus: String(
+        v.return_status || v.dropoff_status || ""
+      ).toLowerCase(),
+    };
+  });
+}
+
+/** รองรับวันที่ไทย / พ.ศ. / ตัวเลขไทย */
+function safeDate(x) {
+  if (!x) return null;
+  try {
+    if (x instanceof Date) return isNaN(x.getTime()) ? null : x;
+    if (typeof x === "number") return new Date(x);
+
+    let s = String(x).trim();
+    if (!s) return null;
+
+    // แปลงเลขไทย -> อารบิก
+    s = s.replace(/[๐-๙]/g, (d) => "0123456789"["๐๑๒๓๔๕๖๗๘๙".indexOf(d)]);
+
+    // เคส ISO/SQL ปกติ
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      s = s.replace("T", " ");
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    // เคส dd/mm/yyyy (พ.ศ. หรือ ค.ศ.)
+    // รองรับ "18/09/2568 02:37" หรือ "18-09-2568 02:37"
+    const m = s.match(
+      /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{1,2}))?/
+    );
+    if (m) {
+      let dd = parseInt(m[1], 10);
+      let mm = parseInt(m[2], 10);
+      let yyyy = parseInt(m[3], 10);
+      const HH = parseInt(m[4] ?? "0", 10);
+      const II = parseInt(m[5] ?? "0", 10);
+      if (yyyy >= 2400) yyyy -= 543; // พ.ศ. -> ค.ศ.
+      const d = new Date(yyyy, mm - 1, dd, HH, II, 0);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
 }

@@ -1,3 +1,4 @@
+// Components/admin/CarsTable.jsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -12,6 +13,21 @@ const ERP_DELETE_URL =
 const ERP_EDIT_URL =
   "https://demo.erpeazy.com/api/method/erpnext.api.edit_vehicles";
 // const ERP_AUTH = "token xxx:yyy";
+
+/** ✅ Base URL และตัวช่วยแปลง URL รูป */
+const ERP_BASE = process.env.NEXT_PUBLIC_ERP_BASE || "https://demo.erpeazy.com";
+function normalizeImage(u) {
+  if (!u) return "";
+  const s0 = String(u).trim();
+  if (/^(data:|blob:)/i.test(s0)) return s0; // ไม่แตะ data: / blob:
+  let s = s0;
+  if (s.startsWith("//")) s = "https:" + s;
+  if (s.startsWith("/")) s = ERP_BASE.replace(/\/+$/, "") + s;
+  if (!/^https?:\/\//i.test(s)) {
+    s = ERP_BASE.replace(/\/+$/, "") + "/" + s.replace(/^\/+/, "");
+  }
+  return encodeURI(s);
+}
 
 export default function CarsTable({
   cars = [],
@@ -113,7 +129,8 @@ export default function CarsTable({
       status: car?.status ?? "ว่าง",
       company: car?.company || "",
       description: car?.description ?? "",
-      imageData: car?.imageData || car?.imageUrl || "",
+      // ✅ รูปปัจจุบัน normalize ให้เป็น URL เต็ม (รองรับ /files/xxx)
+      imageData: normalizeImage(car?.imageData || car?.imageUrl || ""),
       imageRemoved: false,
     });
     setEditOpen(true);
@@ -143,7 +160,7 @@ export default function CarsTable({
     reader.onload = () =>
       setEditForm((p) => ({
         ...p,
-        imageData: String(reader.result),
+        imageData: String(reader.result), // data: URL
         imageRemoved: false,
       }));
     reader.onerror = () => {
@@ -202,10 +219,10 @@ export default function CarsTable({
       }
 
       const nextImageData = newFile
-        ? URL.createObjectURL(newFile)
+        ? URL.createObjectURL(newFile) // blob: แสดงใน UI ทันที
         : editForm.imageRemoved
         ? ""
-        : editForm.imageData;
+        : editForm.imageData; // ค่าที่ normalize มาแล้ว
 
       const updatedLocal = {
         id: editForm.id || selectedId,
@@ -380,6 +397,7 @@ export default function CarsTable({
               <th className="py-2 pr-3">รุ่น</th>
               <th className="py-2 pr-3">ยี่ห้อ</th>
               <th className="py-2 pr-3">ป้ายทะเบียน</th>
+              <th className="py-2 pr-3">ประเภทรถ</th>
               <th className="py-2 pr-3">ราคา/วัน</th>
               <th className="py-2 pr-3">สถานะ</th>
               <th className="py-2 pr-3">จองถัดไป</th>
@@ -390,13 +408,15 @@ export default function CarsTable({
           <tbody className="divide-y divide-gray-200 text-black">
             {loading && rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-6 text-center">
+                {/* ✅ มี 9 คอลัมน์ -> colSpan=9 */}
+                <td colSpan={9} className="py-6 text-center">
                   กำลังโหลดข้อมูล…
                 </td>
               </tr>
             ) : filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-6 text-center">
+                {/* ✅ มี 9 คอลัมน์ -> colSpan=9 */}
+                <td colSpan={9} className="py-6 text-center">
                   ไม่พบข้อมูลตามตัวกรอง
                 </td>
               </tr>
@@ -421,6 +441,7 @@ export default function CarsTable({
                     <td className="py-3 pr-3 font-medium">{c.name}</td>
                     <td className="py-3 pr-3">{c.brand || "—"}</td>
                     <td className="py-3 pr-3">{c.licensePlate || "—"}</td>
+                    <td className="py-3 pr-3">{c.type || "—"}</td>
                     <td className="py-3 pr-3">
                       {fmtBaht(Number(c.pricePerDay || 0))} ฿
                     </td>
@@ -653,8 +674,9 @@ export default function CarsTable({
 
                 {editForm.imageData ? (
                   <div className="mt-3">
+                    {/* ✅ ใช้ normalizeImage กันพาธ /files/... */}
                     <img
-                      src={editForm.imageData}
+                      src={normalizeImage(editForm.imageData)}
                       alt="ตัวอย่างรูปรถ"
                       className="h-28 w-auto rounded-lg border object-cover"
                     />
@@ -795,6 +817,22 @@ const isPlainObject = (v) =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 function mapVehicleObject(v) {
+  // รูป: รองรับ vehicle_image และพาธ /files/...
+  const rawImg =
+    v.imageData ||
+    v.image_url ||
+    v.image ||
+    v.photo ||
+    v.thumbnail ||
+    v.vehicle_image || // <- สำคัญกับ payload ชุดนี้
+    "";
+  const img = normalizeImage(rawImg);
+
+  // แปลงตัวเลข/สตริง
+  const priceNum = Number(v.price_per_day ?? v.rate ?? v.price ?? 0);
+  const seatsNum = Number(v.seats ?? v.seat ?? 5); // <- รองรับ seat
+  const yearNum = Number(v.year ?? 0);
+
   return {
     id:
       v.id ||
@@ -807,24 +845,25 @@ function mapVehicleObject(v) {
     vid: v.vid || "",
     name: v.model || v.vehicle_name || v.name || "—",
     brand: v.brand || v.make || "",
-    licensePlate: v.license_plate || v.plate || v.licensePlate || "",
-    pricePerDay: Number(v.price_per_day ?? v.rate ?? v.price ?? 0),
+    licensePlate: (v.license_plate || v.plate || v.licensePlate || "").trim(),
+    pricePerDay: priceNum,
     status: v.status || "ว่าง",
-    type: v.type || v.category || "Sedan",
-    transmission: v.transmission || "อัตโนมัติ",
-    seats: Number(v.seats ?? 5),
-    fuel: v.fuel || "เบนซิน",
-    year: Number(v.year ?? 0),
+    // รองรับหลายคีย์จาก backend
+    type: v.type || v.v_type || v.ftype || v.category || "Sedan",
+    transmission: v.transmission || v.gear_system || "อัตโนมัติ", // <- รองรับ gear_system
+    seats: seatsNum,
+    fuel: v.fuel || v.fuel_type || "เบนซิน", // <- รองรับ fuel_type
+    year: yearNum,
     company: v.company || "",
     description: v.description || "",
-    imageData:
-      v.imageData || v.image_url || v.image || v.photo || v.thumbnail || "",
-    imageUrl:
-      v.image_url || v.image || v.photo || v.thumbnail || v.imageData || "",
+    imageData: img, // ใช้ URL เต็ม / data: / blob: ได้
+    imageUrl: img,
   };
 }
+
 function mapVehicleArray(arr) {
   const [id, brand, model, plate, price, status, img] = arr;
+  const imgUrl = normalizeImage(img || "");
   return {
     id: id ?? "",
     vid: "",
@@ -840,7 +879,7 @@ function mapVehicleArray(arr) {
     year: 0,
     company: "",
     description: "",
-    imageData: img || "",
-    imageUrl: img || "",
+    imageData: imgUrl,
+    imageUrl: imgUrl,
   };
 }

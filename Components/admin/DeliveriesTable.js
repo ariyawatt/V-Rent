@@ -375,7 +375,7 @@ export default function DeliveriesTable() {
               setQ("");
               setDate("");
             }}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50 text-black"
           >
             ล้างตัวกรอง
           </button>
