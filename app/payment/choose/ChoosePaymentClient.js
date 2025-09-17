@@ -202,11 +202,15 @@ export default function ChoosePaymentClient() {
       alert("ราคาต่อวันไม่ถูกต้อง");
       return;
     }
-    // (เสริม) ชื่อ/เบอร์/อีเมล (ถ้ามี) ตรวจแบบเบาๆ
-    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (email && !emailRe.test(email)) {
-      alert("อีเมลไม่ถูกต้อง");
-      return;
+    // ✅ อนุโลม email ที่ไม่มี @ เมื่อไม่ได้จ่ายด้วยบัตร
+    const emailVal = (email ?? "").trim();
+    // บังคับตรวจ format เฉพาะกรณีจ่ายด้วยบัตร และกรอกอีเมลมา
+    if (method === "visa" && emailVal) {
+      const emailRe = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+      if (!emailRe.test(emailVal)) {
+        alert("กรุณากรอกอีเมลให้ถูกต้อง");
+        return;
+      }
     }
 
     setSubmitting(true);

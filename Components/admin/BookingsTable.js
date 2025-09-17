@@ -2,6 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+// ชี้ฐานโดเมน ERP (ปรับได้ผ่าน env)
+const ERP_BASE = process.env.NEXT_PUBLIC_ERP_BASE || "https://demo.erpeazy.com";
+
+// แปลง path ให้เป็น URL เต็ม
+
+function normalizeFileUrl(u) {
+  if (!u) return "";
+  let s = String(u).trim();
+  if (s.startsWith("//")) s = "https:" + s;
+  if (s.startsWith("/")) s = ERP_BASE.replace(/\/+$/, "") + s;
+  if (!/^https?:\/\//i.test(s)) {
+    s = ERP_BASE.replace(/\/+$/, "") + "/" + s.replace(/^\/+/, "");
+  }
+  return encodeURI(s);
+}
+
 /* ───────── helpers ───────── */
 const toDate = (val) => {
   if (!val) return null;
@@ -213,6 +229,15 @@ function normalizeRental(rec) {
     docType: rec?.id_document_type || "",
     note: rec?.note || "",
     createdAt: rec?.creation || rec?.created_at || "",
+
+    // ✅ URL รูปสลิป (แสดงใน DetailModal)
+    receiptUrl: normalizeFileUrl(
+      rec?.payment_receipt ||
+        rec?.receipt ||
+        rec?.payment_slip ||
+        rec?.payment_image ||
+        ""
+    ),
   };
 }
 
@@ -360,14 +385,45 @@ function DetailModal({ open, data, onClose }) {
             </div>
           </div>
 
-          {/* สลิป Mockup */}
+          {/* สลิปชำระเงิน */}
           <div className="mt-4">
             <div className="text-xs font-semibold text-black mb-1">
-              สลิปชำระเงิน (Mockup)
+              สลิปชำระเงิน
             </div>
-            <div className="grid place-items-center h-44 border-2 border-dashed rounded-xl text-sm text-gray-400 select-none">
-              — ยังไม่มีสลิป —
-            </div>
+
+            {data.receiptUrl ? (
+              <div className="rounded-xl border border-gray-200 p-3 bg-gray-50">
+                <a
+                  href={data.receiptUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block"
+                  title="เปิดรูปในแท็บใหม่"
+                >
+                  <img
+                    src={data.receiptUrl}
+                    alt="หลักฐานการชำระเงิน"
+                    className="max-h-72 w-auto mx-auto rounded-lg object-contain"
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                  />
+                </a>
+                <div className="mt-2 text-center text-xs text-slate-600 break-all">
+                  <a
+                    href={data.receiptUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    เปิดไฟล์ / ดาวน์โหลด
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="grid place-items-center h-44 border-2 border-dashed rounded-xl text-sm text-gray-400 select-none">
+                — ยังไม่มีสลิป —
+              </div>
+            )}
           </div>
         </div>
 
