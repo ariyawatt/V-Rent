@@ -1,5 +1,5 @@
 // app/cars/CarsPageContent.js
-'use client';
+"use client";
 
 import { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
@@ -41,6 +41,13 @@ export default function CarsPageContent() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
+  // helper: ทำให้ type เป็นตัวพิมพ์ใหญ่/ตัดช่องว่าง
+  const norm = (s) =>
+    String(s ?? "")
+      .trim()
+      .toUpperCase();
+  const selectedFtype = norm(payload.ftype); // เช่น "SEDAN" | "" (ไม่เลือก)
+
   useEffect(() => {
     const ac = new AbortController();
     (async () => {
@@ -62,13 +69,22 @@ export default function CarsPageContent() {
         }
         if (!res.ok)
           throw new Error(`HTTP ${res.status} ${text?.slice?.(0, 200) || ""}`);
-        setCars(
-          Array.isArray(data?.message)
-            ? data.message
-            : Array.isArray(data)
-            ? data
-            : []
-        );
+
+        const rawCars = Array.isArray(data?.message)
+          ? data.message
+          : Array.isArray(data)
+          ? data
+          : [];
+
+        // ✅ กรองที่ฝั่ง client ตาม ftype ที่ผู้ใช้เลือก
+        const filtered = !selectedFtype
+          ? rawCars
+          : rawCars.filter((car) => {
+              // รองรับหลายคีย์ที่ backend อาจส่งมา: ftype | type | v_type
+              const carType = norm(car.ftype ?? car.type ?? car.v_type);
+              return carType === selectedFtype;
+            });
+        setCars(filtered);
       } catch (e) {
         if (e.name !== "AbortError") {
           setErr(String(e));
@@ -80,6 +96,13 @@ export default function CarsPageContent() {
     })();
     return () => ac.abort();
   }, [payload]);
+
+  // (ทางเลือกเสริมปลอดภัย) ถ้าต้องการกรองซ้ำตอน render ก็ทำผ่าน useMemo นี้ได้
+  // const carsToShow = useMemo(() => {
+  //   if (!selectedFtype) return cars;
+  //   return cars.filter((car) => norm(car.ftype ?? car.type ?? car.v_type) === selectedFtype);
+  // }, [cars, selectedFtype]);
+  // แล้วเปลี่ยนด้านล่างจาก cars เป็น carsToShow
 
   return (
     <>
@@ -93,9 +116,7 @@ export default function CarsPageContent() {
 
       {loading && <div className="text-gray-300">กำลังโหลดข้อมูล...</div>}
       {err && (
-        <div className="text-red-400 mb-4 break-all">
-          โหลดล้มเหลว: {err}
-        </div>
+        <div className="text-red-400 mb-4 break-all">โหลดล้มเหลว: {err}</div>
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 sm:gap-6 lg:gap-8">
@@ -122,8 +143,7 @@ export default function CarsPageContent() {
             const pickupLoc =
               search.get("pickupLocation") || search.get("pickup_location");
             const dropoffLoc =
-              search.get("dropoffLocation") ||
-              search.get("dropoff_location");
+              search.get("dropoffLocation") || search.get("dropoff_location");
             const returnSame =
               search.get("returnSame") ?? search.get("return_same");
             if (pickupLoc) q.set("pickupLocation", pickupLoc);
@@ -144,9 +164,6 @@ export default function CarsPageContent() {
                       className="object-cover"
                       sizes="(min-width:1024px) 25vw, (min-width:640px) 50vw, 100vw"
                     />
-                    <span className="absolute left-2 top-2 rounded-full bg-black/75 text-white text-[11px] px-2 py-0.5">
-                      {car.company || car.company_name || "ไม่ระบุบริษัท"}
-                    </span>
                   </div>
                   <div className="p-3 space-y-1.5">
                     <h3 className="text-base font-semibold leading-snug">
@@ -159,9 +176,7 @@ export default function CarsPageContent() {
                     <p className="text-sm font-bold mt-1">
                       {car.price_per_day ?? car.price ?? car.rate_per_day
                         ? `${Number(
-                            car.price_per_day ??
-                              car.price ??
-                              car.rate_per_day
+                            car.price_per_day ?? car.price ?? car.rate_per_day
                           ).toLocaleString("th-TH")} บาท/วัน`
                         : "-"}
                     </p>

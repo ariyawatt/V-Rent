@@ -216,10 +216,6 @@ export default function CarInfo() {
             aria-label="ดูรูปแบบเต็มจอ"
             disabled={loading}
           >
-            <span className="absolute left-3 top-3 z-10 rounded-full bg-black/75 text-white text-xs px-2 py-1">
-              {companyName}
-            </span>
-
             <Image
               src={imageUrl}
               alt={name}

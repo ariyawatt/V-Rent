@@ -1,5 +1,5 @@
 // app/payment/choose/ChoosePaymentClient.js
-'use client';
+"use client";
 
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -152,12 +152,14 @@ export default function ChoosePaymentClient() {
     return Math.max(diff, 1);
   }, [calcPick, calcDrop]);
 
-  const base = (car?.pricePerDay || 0) * dayCount;
+  // ---------- ราคา ----------
+  const unitPrice = Number(car?.pricePerDay || 0); // ราคาต่อวัน
+  const baseTotal = unitPrice * dayCount; // ราคารถรวม (ก่อน option)
   const extrasSum =
     (extras.childSeat ? 120 : 0) * dayCount +
     (extras.gps ? 80 : 0) * dayCount +
     (extras.fullInsurance ? 300 : 0) * dayCount;
-  const total = base + extrasSum;
+  const total = baseTotal + extrasSum; // ยอดสุทธิ
 
   const [method, setMethod] = useState("promptpay");
   const [card, setCard] = useState({
@@ -176,6 +178,37 @@ export default function ChoosePaymentClient() {
 
   async function handlePay() {
     if (submitting) return;
+
+    // ---- VALIDATION ก่อนส่ง ERP ----
+    // 1) ต้องมีวัน-เวลารับ/คืน
+    if (!calcPick || !calcDrop) {
+      alert("กรุณาระบุวัน-เวลารับรถและคืนรถให้ครบ");
+      return;
+    }
+    // 2) รูปแบบวันที่ต้องถูกต้อง
+    const pick = new Date(calcPick || displayPick);
+    const drop = new Date(calcDrop || displayDrop);
+    if (Number.isNaN(pick.getTime()) || Number.isNaN(drop.getTime())) {
+      alert("รูปแบบวัน-เวลาไม่ถูกต้อง");
+      return;
+    }
+    // 3) คืนรถต้อง 'ช้ากว่า' รับรถ
+    if (drop <= pick) {
+      alert("วัน-เวลาคืนรถต้องช้ากว่าวัน-เวลารับรถ");
+      return;
+    }
+    // 4) ราคาต่อวันต้องมากกว่า 0
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      alert("ราคาต่อวันไม่ถูกต้อง");
+      return;
+    }
+    // (เสริม) ชื่อ/เบอร์/อีเมล (ถ้ามี) ตรวจแบบเบาๆ
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (email && !emailRe.test(email)) {
+      alert("อีเมลไม่ถูกต้อง");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const extrasList = [
@@ -193,30 +226,30 @@ export default function ChoosePaymentClient() {
         "vehicle",
         car?.name || [carBrand, carName].filter(Boolean).join(" ") || "Vehicle"
       );
-      fd.append("base_price", String(base));
+
+      // ✅ ราคา
+      fd.append("base_price", String(unitPrice)); // ราคาต่อวัน
+      fd.append("base_total", String(baseTotal)); // ราคารวม (ยังไม่รวม option)
+      fd.append("price_per_day", String(unitPrice));
+      fd.append("price", String(unitPrice));
+      fd.append("total_price", String(total)); // ยอดสุทธิ
+      fd.append("down_payment", String(total)); // ชำระเต็ม
+
+      // ✅ อื่นๆ
       fd.append("pickup_place", pickupLocation || "");
       fd.append("return_place", dropoffLocation || "");
       fd.append("pickup_date", toErpDateTime(calcPick || displayPick));
       fd.append("return_date", toErpDateTime(calcDrop || displayDrop));
       fd.append("discount", "0");
-      fd.append("down_payment", String(total));
       fd.append("contact_platform", "website");
       fd.append("additional_options", additional_options);
       fd.append("remark", note || "");
-      fd.append("total_price", String(total));
 
-      if (slip) {
-        fd.append("receipt", slip, slip.name || "receipt.jpg");
-      }
+      if (slip) fd.append("receipt", slip, slip.name || "receipt.jpg");
 
       const res = await fetch(
         "https://demo.erpeazy.com/api/method/erpnext.api.create_rental",
-        {
-          method: "POST",
-          body: fd,
-          credentials: "include",
-          redirect: "follow",
-        }
+        { method: "POST", body: fd, credentials: "include", redirect: "follow" }
       );
 
       const text = await res.text();
@@ -248,7 +281,8 @@ export default function ChoosePaymentClient() {
     for (const [k, v] of sp.entries()) o[k] = v;
     o.__derived__ = {
       dayCount,
-      base,
+      unitPrice,
+      baseTotal,
       extrasSum,
       total,
       displayPick,
@@ -256,7 +290,17 @@ export default function ChoosePaymentClient() {
       isAdmin,
     };
     return o;
-  }, [sp, dayCount, base, extrasSum, total, displayPick, displayDrop, isAdmin]);
+  }, [
+    sp,
+    dayCount,
+    unitPrice,
+    baseTotal,
+    extrasSum,
+    total,
+    displayPick,
+    displayDrop,
+    isAdmin,
+  ]);
 
   return (
     <>
@@ -518,8 +562,12 @@ export default function ChoosePaymentClient() {
           <hr className="my-2 border-slate-300" />
 
           <div className="flex justify-between">
-            <span>ราคารถ (x{dayCount})</span>
-            <span>฿{fmt(base)}</span>
+            <span>ราคาต่อวัน</span>
+            <span>฿{fmt(unitPrice)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>ราคารถรวม (x{dayCount})</span>
+            <span>฿{fmt(baseTotal)}</span>
           </div>
           <div className="flex justify-between">
             <span>ตัวเลือกเสริม</span>
@@ -532,23 +580,21 @@ export default function ChoosePaymentClient() {
 
           <hr className="my-2 border-slate-300" />
 
-          <div className="text-xs text-slate-800">
-            หมายเหตุ: {note || "-"}
-          </div>
+          <div className="text-xs text-slate-800">หมายเหตุ: {note || "-"}</div>
 
           {isAdmin ? (
             <div className="mt-2 text-xs font-semibold text-green-700">
               (Admin mode)
             </div>
           ) : null}
-          {passengers || promo || ftype || key ? (
+          {(passengers || promo || ftype || key) && (
             <div className="mt-2 text-xs text-slate-700 space-y-1">
               {passengers ? <div>ผู้โดยสาร: {passengers}</div> : null}
               {ftype ? <div>ประเภทรถ: {ftype}</div> : null}
               {promo ? <div>โค้ดส่วนลด: {promo}</div> : null}
               {key ? <div>key: {key}</div> : null}
             </div>
-          ) : null}
+          )}
         </div>
       </aside>
     </>
