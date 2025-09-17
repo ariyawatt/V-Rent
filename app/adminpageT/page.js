@@ -1,7 +1,7 @@
 // app/admin/page.jsx
 "use client";
 
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import Headers from "@/Components/HeaderAd";
 import Footer from "@/Components/Footer";
@@ -13,7 +13,43 @@ import BookingsTable from "@/Components/admin/BookingsTable";
 import DeliveriesTable from "@/Components/admin/DeliveriesTable";
 import { fmtDateTimeLocal, computeDays } from "@/Components/admin/utils";
 
-// …(state และฟังก์ชันเดิมๆ เกี่ยวกับ cars / bookings / deliveries / todaySummary / nextBookingMap ฯลฯ ใส่ไว้ที่นี่)…
+/* ===== ERP CONFIG (ให้สอดคล้องกับ CarsTable) =====
+   ใช้ endpoint edit_vehicles เพื่ออัปเดตสถานะรถใน ERP */
+const ERP_EDIT_URL =
+  "https://demo.erpeazy.com/api/method/erpnext.api.edit_vehicles";
+
+/* ยิง API ไป ERP เพื่ออัปเดตสถานะรถ
+   - carPlate: ป้ายทะเบียน (แนะนำส่งอันนี้เป็นคีย์หลัก)
+   - statusEn: สถานะ EN ที่ ERP เข้าใจ ("In Use", "Available", "Maintenance", ...)
+*/
+async function updateCarStatusOnServer({ carPlate, statusEn }) {
+  if (!carPlate || !statusEn) return;
+
+  const fd = new FormData();
+  fd.append("license_plate", carPlate);
+  fd.append("status", statusEn);
+
+  const res = await fetch(ERP_EDIT_URL, {
+    method: "POST",
+    body: fd,
+    credentials: "include",
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    // ส่ง error body กลับเพื่อดีบักง่าย
+    throw new Error(text || `Update car status failed (${res.status})`);
+  }
+}
+
+/* Map สถานะภาษาอังกฤษจาก ERP → ป้ายภาษาไทยสำหรับโชว์ในตาราง
+   NOTE: ให้สอดคล้องกับ getCarRowStatus ใน CarsTable */
+function mapStatusToThai(en) {
+  const v = String(en || "").toLowerCase();
+  if (v === "in use") return "ถูกยืมอยู่";
+  if (v === "maintenance") return "ซ่อมแซม";
+  return "ว่าง"; // available / undefined
+}
 
 export default function AdminPage() {
   // ---- data หลัก (ตัวอย่าง minimal) ----
@@ -27,7 +63,7 @@ export default function AdminPage() {
   const carMapById = useMemo(() => new Map(), []);
   const carMapByKey = useMemo(() => new Map(), []);
 
-  // ---- อ่าน userId จาก localStorage แบบปลอดภัย (ไม่อ่านตรงๆ ใน render) ----
+  // ---- อ่าน userId จาก localStorage แบบปลอดภัย ----
   const [userId, setUserId] = useState("");
   useEffect(() => {
     try {
@@ -74,7 +110,6 @@ export default function AdminPage() {
 
     const price = Number(carForm.pricePerDay || 0) || 0;
 
-    // โครงสร้างตัวอย่างให้ตารางโชว์ได้ (ปรับตามสคีมจริงของคุณได้)
     const newCar = {
       id: `tmp_${Date.now()}`,
       name,
@@ -84,14 +119,73 @@ export default function AdminPage() {
       status: "ว่าง",
       type: "",
       key: "",
+      // stage / stageLabel จะถูกใส่ตอนมีการยืม/คืน
     };
 
     setCars((prev) => [newCar, ...prev]);
     setCarForm({ name: "", brand: "", pricePerDay: "", imageData: "" });
   };
 
-  // ---- สถานะแถวรถ (ใส่ลอจิกจริงของคุณได้) ----
-  const getCarRowStatus = (car, bookings, now) => car?.status || "ว่าง";
+  // ---------- helpers: match car ----------
+  const carMatchKey = (name, plate) =>
+    (plate || name || "").trim().toLowerCase();
+
+  // ---------- เมื่อ “กำลังเช่า” → ยิง API ให้รถเป็น "In Use" แล้วอัปเดต UI ----------
+  const handleConfirmPickup = async ({ carPlate = "", carName = "" }) => {
+    const key = carMatchKey(carName, carPlate);
+
+    try {
+      await updateCarStatusOnServer({ carPlate, statusEn: "In Use" }); // ยิงจริงไป ERP
+    } catch (e) {
+      alert("อัปเดตสถานะรถในเซิร์ฟเวอร์ไม่สำเร็จ: " + (e?.message || e));
+      return; // ถ้ายิงไม่ผ่าน ก็ไม่ปรับ UI เพื่อกันข้อมูลไม่ตรง
+    }
+
+    // อัปเดต UI ให้สะท้อนสถานะล่าสุดจาก ERP
+    setCars((list) =>
+      list.map((c) => {
+        const k = carMatchKey(c.name, c.plate || c.licensePlate);
+        if (k !== key) return c;
+        const statusTh = mapStatusToThai("In Use");
+        return {
+          ...c,
+          status: "In Use", // เก็บ EN ไว้เผื่อส่วนอื่นใช้
+          stage: "borrowed",
+          stageLabel: statusTh,
+        };
+      })
+    );
+  };
+
+  // ---------- เมื่อเสร็จสิ้น → ยิง API ให้รถเป็น "Available" แล้วอัปเดต UI ----------
+  const handleComplete = async ({ carPlate = "", carName = "" }) => {
+    const key = carMatchKey(carName, carPlate);
+
+    try {
+      await updateCarStatusOnServer({ carPlate, statusEn: "Available" });
+    } catch (e) {
+      alert("อัปเดตสถานะรถในเซิร์ฟเวอร์ไม่สำเร็จ: " + (e?.message || e));
+      return;
+    }
+
+    setCars((list) =>
+      list.map((c) => {
+        const k = carMatchKey(c.name, c.plate || c.licensePlate);
+        if (k !== key) return c;
+        const statusTh = mapStatusToThai("Available");
+        return {
+          ...c,
+          status: "Available",
+          stage: "available",
+          stageLabel: statusTh, // “ว่าง”
+        };
+      })
+    );
+  };
+
+  // ---- สถานะแถวรถ (ใช้ stageLabel ก่อน; ถ้าไม่มีให้ map จาก status EN → TH; สุดท้าย fallback "ว่าง") ----
+  const getCarRowStatus = (car /*, bookings, now */) =>
+    car?.stageLabel || mapStatusToThai(car?.status) || "ว่าง";
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
@@ -143,12 +237,8 @@ export default function AdminPage() {
               onMarkPaid={(b) => {
                 /* มาร์คชำระ */
               }}
-              onConfirmPickup={(b) => {
-                /* รับรถ */
-              }}
-              onComplete={(b) => {
-                /* เสร็จสิ้น */
-              }}
+              onConfirmPickup={handleConfirmPickup} // เมื่อกำลังเช่า → รถเป็น In Use
+              onComplete={handleComplete} // เสร็จสิ้น → รถกลับเป็น Available
             />
           </section>
 

@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 
 // ชี้ฐานโดเมน ERP (ปรับได้ผ่าน env)
 const ERP_BASE = process.env.NEXT_PUBLIC_ERP_BASE || "https://demo.erpeazy.com";
 
 // แปลง path ให้เป็น URL เต็ม
-
 function normalizeFileUrl(u) {
   if (!u) return "";
   let s = String(u).trim();
@@ -884,6 +883,9 @@ export default function BookingsTable({
   const [cancellingId, setCancellingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
 
+  // กันการยิง onConfirmPickup ซ้ำ ๆ (ตาม car key)
+  const startedSetRef = useRef(new Set());
+
   // clock
   const [now, setNow] = useState(new Date());
   useEffect(() => {
@@ -960,6 +962,32 @@ export default function BookingsTable({
     });
   }, [rows, q, statusF, now]);
 
+  // เมื่อมี booking ที่อยู่ใน stage "in use" ให้ callback ไป parent เพื่ออัปเดตตารางรถ (ครั้งเดียวต่อคัน)
+  useEffect(() => {
+    if (!onConfirmPickup) return;
+
+    const marked = startedSetRef.current;
+
+    rows.forEach((r) => {
+      const life = getLifecycle(r, now);
+      if (life === "in use") {
+        const carKey = (r.carPlate || r.carName || "").trim().toLowerCase();
+        if (!carKey) return;
+
+        if (!marked.has(carKey)) {
+          marked.add(carKey);
+          onConfirmPickup({
+            bookingCode: r.bookingCode,
+            carName: r.carName || "",
+            carPlate: r.carPlate || "",
+            newStageCode: "borrowed",
+            newStageLabel: "ถูกยืมอยู่",
+          });
+        }
+      }
+    });
+  }, [rows, now, onConfirmPickup]);
+
   /* edit + detail modal states */
   const [editOpen, setEditOpen] = useState(false);
   const [editRow, setEditRow] = useState(null);
@@ -991,6 +1019,8 @@ export default function BookingsTable({
 
   const applyEditedLocal = (newRec) => {
     onEdited?.(newRec);
+
+    // อัปเดตในตารางภายใน (กรณีไม่ได้รับ bookings ผ่าน props)
     if (!(Array.isArray(bookings) && bookings.length > 0)) {
       setRemoteRows((prev) =>
         prev.map((r) =>
@@ -999,6 +1029,25 @@ export default function BookingsTable({
             : r
         )
       );
+    }
+
+    // ✅ ถ้าสถานะใหม่เป็น "in use" ให้แจ้ง parent ไปอัปเดต "ตารางรถ" เป็น "ถูกยืมอยู่"
+    const isInUse =
+      String(newRec?.bookingStatus || "").toLowerCase() === "in use";
+    if (isInUse && onConfirmPickup) {
+      const carKey = (newRec.carPlate || newRec.carName || "")
+        .trim()
+        .toLowerCase();
+      if (carKey && !startedSetRef.current.has(carKey)) {
+        startedSetRef.current.add(carKey);
+        onConfirmPickup({
+          bookingCode: newRec.bookingCode,
+          carName: newRec.carName || "",
+          carPlate: newRec.carPlate || "",
+          newStageCode: "borrowed",
+          newStageLabel: "ถูกยืมอยู่",
+        });
+      }
     }
   };
 
@@ -1197,7 +1246,7 @@ export default function BookingsTable({
 
       {!loading && !err && (
         <>
-          {/* จอเล็ก: แบบการ์ด (ไม่ต้องเลื่อนซ้าย-ขวา) */}
+          {/* จอเล็ก: แบบการ์ด */}
           <div className="mt-4 md:hidden">
             <CompactList
               rows={filtered}
@@ -1212,7 +1261,7 @@ export default function BookingsTable({
             />
           </div>
 
-          {/* จอ md ขึ้นไป: ตารางพอดีหน้าต่าง ไม่มี min-width/overflow */}
+          {/* จอ md ขึ้นไป: ตาราง */}
           <div className="mt-4 hidden md:block">
             <table className="w-full table-auto text-sm">
               <thead>

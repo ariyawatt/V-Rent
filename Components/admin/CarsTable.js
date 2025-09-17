@@ -20,7 +20,13 @@ export default function CarsTable({
   nextBookingMap = {},
   onEdit,
   onDelete,
-  getCarRowStatus = (c) => c.status || "ว่าง",
+  // ✅ default แปลง EN → TH เพื่อให้โชว์/กรองตรงกัน
+  getCarRowStatus = (c) => {
+    const v = String(c?.status || "").toLowerCase();
+    if (v === "in use" || v === "ถูกยืมอยู่") return "ถูกยืมอยู่";
+    if (v === "maintenance" || v === "ซ่อมแซม") return "ซ่อมแซม";
+    return "ว่าง"; // available / undefined
+  },
   apiUrl = "https://demo.erpeazy.com/api/method/erpnext.api.get_vehicles_admin",
   autoFetchIfEmpty = true,
 }) {
@@ -70,6 +76,13 @@ export default function CarsTable({
           [];
         setRows(normalizeVehicles(rawList));
       } catch (e) {
+        // ✅ ถ้าเป็น abort ไม่ต้องแสดง error
+        if (
+          e?.name === "AbortError" ||
+          String(e?.message).includes("aborted")
+        ) {
+          return;
+        }
         setError(e?.message || "โหลดรายการรถไม่สำเร็จ");
       } finally {
         setLoading(false);
@@ -96,6 +109,7 @@ export default function CarsTable({
       fuel: car?.fuel ?? "เบนซิน",
       year: String(car?.year ?? ""),
       pricePerDay: String(car?.pricePerDay ?? 0),
+      // TIP: field status เก็บอะไรก็ได้ (EN/TH) — เราจะแปลงตอนโชว์/กรองด้วย getCarRowStatus
       status: car?.status ?? "ว่าง",
       company: car?.company || "",
       description: car?.description ?? "",
@@ -281,10 +295,10 @@ export default function CarsTable({
   const filteredRows = useMemo(() => {
     const q = filterQ.trim().toLowerCase();
     return rows.filter((c) => {
+      // ✅ ใช้สถานะที่ผ่าน getCarRowStatus เพื่อให้เข้ากับค่าตัวกรองที่เป็นภาษาไทย
+      const displayStatus = getCarRowStatus(c, bookings, now);
       const matchStatus =
-        filterStatus === "ทั้งหมด"
-          ? true
-          : (c.status || "ว่าง") === filterStatus;
+        filterStatus === "ทั้งหมด" ? true : displayStatus === filterStatus;
       if (!matchStatus) return false;
 
       if (!q) return true;
@@ -295,7 +309,7 @@ export default function CarsTable({
 
       return keys.some((v) => v.includes(q));
     });
-  }, [rows, filterQ, filterStatus]);
+  }, [rows, filterQ, filterStatus, bookings, now, getCarRowStatus]);
 
   // สำหรับ column runnum → ใช้ filteredRows
   const dataForRender = useMemo(
@@ -614,6 +628,7 @@ export default function CarsTable({
                   onChange={handleEditChange}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-700 focus:ring-gray-700"
                 >
+                  {/* ค่าใน ERP จะเป็น EN ก็ได้ เราแปลงทีหลังตอนแสดง */}
                   <option value="Available">ว่าง</option>
                   <option value="In Use">ถูกยืมอยู่</option>
                   <option value="Maintenance">ซ่อมแซม</option>
