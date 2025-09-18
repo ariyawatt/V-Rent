@@ -1219,7 +1219,6 @@ export default function BookingsTable({
       // mark ว่ากำลังทำงาน (เอาไว้ disable ปุ่ม)
       setCompletingId(b.bookingCode);
 
-
       // ✅ อัปเดตสถานะการจองใน ERP → Completed
       // ใช้ API เฉพาะเปลี่ยน status ไม่ต้องส่ง field อื่น
       await apiEditRentalStatus(b.bookingCode, "Completed");
@@ -1228,7 +1227,6 @@ export default function BookingsTable({
       onComplete?.(b);
 
       // ✅ อัปเดตใน state local ด้วย (ให้ UI เปลี่ยนเป็น Completed + Paid)
-
 
       if (!(Array.isArray(bookings) && bookings.length > 0)) {
         setRemoteRows((prev) =>
@@ -1254,9 +1252,7 @@ export default function BookingsTable({
       if (!ok) return;
       setCancellingId(b.bookingCode);
 
-
       await apiEditRentalStatus(b.bookingCode, "Cancelled");
-
 
       if (!(Array.isArray(bookings) && bookings.length > 0)) {
         setRemoteRows((prev) =>
@@ -1423,7 +1419,6 @@ export default function BookingsTable({
             />
           </div>
 
-
           {/* จอ md ขึ้นไป: ตาราง */}
 
           <div className="mt-4 hidden md:block">
@@ -1461,9 +1456,7 @@ export default function BookingsTable({
                           → {fmtDateTimeLocal(b.returnTime)}
                         </div>
                       </td>
-
                       {/* รหัส/ลูกค้า/รถ */}
-
                       <td className="py-3 pr-3 font-medium text-black break-words">
                         {b.bookingCode}
                       </td>
@@ -1476,9 +1469,7 @@ export default function BookingsTable({
                       <td className="py-3 pr-3 text-black break-words">
                         {(b.carName || "—") + " / " + (b.carPlate || "—")}+{" "}
                       </td>
-
                       {/* ราคา/วัน / วันเช่า / รวมสุทธิ */}
-
                       <td className="py-3 pr-3 text-right text-black whitespace-nowrap font-mono tabular-nums hidden lg:table-cell">
                         {fmtBaht(b.pricePerDay)}&nbsp;฿
                       </td>
@@ -1488,9 +1479,7 @@ export default function BookingsTable({
                       <td className="py-3 pr-3 text-right text-black whitespace-nowrap font-mono tabular-nums">
                         {fmtBaht(total)}&nbsp;฿
                       </td>
-
                       {/* ชำระ/สถานะ */}
-
                       <td className="py-3 pr-3 text-black">
                         {life === "cancelled" ? (
                           <BookingBadge value="cancelled" />
@@ -1501,9 +1490,7 @@ export default function BookingsTable({
                       <td className="py-3 pr-3">
                         <BookingBadge value={life} />
                       </td>
-
                       {/* การจัดการ */}
-
                       <td className="py-3 pr-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <button

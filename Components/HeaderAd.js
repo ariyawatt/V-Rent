@@ -66,7 +66,7 @@ export default function Header() {
     <header className="w-full bg-black text-white px-6 py-4 flex items-center justify-between shadow-md">
       {/* ด้านซ้าย */}
       <div className="text-2xl font-bold">
-        <Link href="/">V-Rent-Admin</Link>
+        <Link href="/adminpageT">V-Rent-Admin</Link>
       </div>
 
       {/* ด้านขวา */}

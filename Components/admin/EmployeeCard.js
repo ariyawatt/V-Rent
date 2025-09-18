@@ -21,15 +21,17 @@ export default function EmployeeCard({ userId = "" }) {
     email: "-",
     branch: "-",
     shift: "-",
+    creationDate: "-",
     startDate: "-",
     lastLogin: "-",
+    image: "", // ✅ เก็บ URL รูปพนักงาน
   });
 
   const [todaySummary, setTodaySummary] = useState({
-    pickups: 0, // ต้องนำส่งวันนี้
-    pickupsDone: 0, // นำส่งแล้ว
-    returns: 0, // ต้องรับคืนวันนี้
-    returnsDone: 0, // ส่งคืนแล้ว
+    pickups: 0,
+    pickupsDone: 0,
+    returns: 0,
+    returnsDone: 0,
   });
 
   const [error, setError] = useState("");
@@ -81,6 +83,7 @@ export default function EmployeeCard({ userId = "" }) {
             start_date,
             last_login,
             role,
+            user_image, // เผื่อ API คืนรูปมาใน array ตำแหน่งท้ายๆ
           ] = msg;
           mapped = {
             id: "-",
@@ -91,8 +94,10 @@ export default function EmployeeCard({ userId = "" }) {
             email: effectiveUserId,
             branch: branch ?? "-",
             shift: "-",
+            creationDate: "-", // ไม่มีใน array
             startDate: start_date ?? "-",
             lastLogin: last_login ?? "-",
+            image: normalizeImage(user_image) || "", // ✅
           };
         } else if (msg && typeof msg === "object") {
           mapped = {
@@ -104,8 +109,13 @@ export default function EmployeeCard({ userId = "" }) {
             email: msg.email || effectiveUserId || "-",
             branch: msg.branch || "-",
             shift: msg.shift || "-",
+            creationDate: msg.creation || "-", // ✅ เริ่มงานจาก creation
             startDate: msg.start_date || msg.startDate || "-",
             lastLogin: msg.last_login || msg.lastLogin || "-",
+            image:
+              normalizeImage(
+                msg.user_image || msg.image || msg.avatar || msg.photo
+              ) || "", // ✅ รองรับหลายคีย์
           };
         } else {
           throw new Error("รูปแบบข้อมูลพนักงานไม่ถูกต้อง");
@@ -193,7 +203,7 @@ export default function EmployeeCard({ userId = "" }) {
             (b) => isToday(b.returnTime) && !isCanceled(b)
           );
 
-          // ❗ กันซ้ำ: ถ้าจบวันนี้ (completed+returnToday) จะไม่นับฝั่ง pickups
+          // กันซ้ำ: ถ้าจบวันนี้ (completed+returnToday) จะไม่นับฝั่ง pickups
           const pickupsToday = pickupsTodayRaw.filter(
             (b) => !(isCompleted(b) && isToday(b.returnTime))
           );
@@ -229,10 +239,19 @@ export default function EmployeeCard({ userId = "" }) {
     return () => controller.abort();
   }, [userId]);
 
+  const bannerImage =
+    employee.image && employee.image !== "-" ? employee.image : "/noimage.jpg"; // 🔁 เปลี่ยนเป็น placeholder ถ้าไม่มีรูป
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      <div className="relative w-full h-40 sm:h-48 lg:h-56 bg-gray-100">
-        <div className="absolute inset-4 rounded-xl border-2 border-dashed border-gray-300" />
+      {/* ======= Banner รูปพนักงาน ======= */}
+      <div className="relative w-full h-40 sm:h-48 lg:h-56 bg-gray-100 flex items-center justify-center">
+        <img
+          src={bannerImage}
+          alt="Employee"
+          className="max-h-full max-w-full object-contain rounded-xl p-3"
+          referrerPolicy="no-referrer"
+        />
       </div>
 
       <div className="p-5">
@@ -255,19 +274,12 @@ export default function EmployeeCard({ userId = "" }) {
                 <div className="text-base font-semibold text-black">
                   {employee.name}
                 </div>
-                <span className="text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-800">
-                  {employee.status}
-                </span>
               </div>
-              <div className="text-sm text-gray-600">{employee.role}</div>
+
               <div className="grid gap-y-1.5 text-sm text-gray-800 mt-3">
-                <div>
-                  รหัสพนักงาน:{" "}
-                  <span className="font-medium text-black">{employee.id}</span>
-                </div>
                 <div>สาขา: {employee.branch}</div>
                 <div>กะทำงาน: {employee.shift}</div>
-                <div>เริ่มงาน: {employee.startDate}</div>
+                <div>เริ่มงาน: {employee.creationDate}</div>
                 <div>เข้าระบบล่าสุด: {employee.lastLogin}</div>
                 <div>โทร: {employee.phone}</div>
                 <div>อีเมล: {employee.email}</div>
@@ -320,6 +332,16 @@ export default function EmployeeCard({ userId = "" }) {
 }
 
 /* ---------------- helpers ---------------- */
+
+// ทำ URL รูปให้เป็นลิงก์เต็ม (รองรับ /files/... หรือ path เปล่า)
+function normalizeImage(u) {
+  if (!u) return "";
+  let s = String(u).trim();
+  if (s.startsWith("//")) s = "https:" + s;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith("/")) return ERP_BASE.replace(/\/+$/, "") + s;
+  return ERP_BASE.replace(/\/+$/, "") + "/" + s.replace(/^\/+/, "");
+}
 
 function extractCounts(payload) {
   if (!payload || Array.isArray(payload)) return null;
