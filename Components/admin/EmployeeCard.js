@@ -29,7 +29,7 @@ export default function EmployeeCard({ userId = "" }) {
     pickups: 0, // ต้องนำส่งวันนี้
     pickupsDone: 0, // นำส่งแล้ว
     returns: 0, // ต้องรับคืนวันนี้
-    returnsDone: 0, // ส่งมอบแล้ว
+    returnsDone: 0, // ส่งคืนแล้ว
   });
 
   const [error, setError] = useState("");
@@ -139,14 +139,12 @@ export default function EmployeeCard({ userId = "" }) {
             const j = await r.json();
             const payload = j?.message ?? j?.data ?? j?.result;
 
-            // (ก) ถ้า API ส่ง "ยอดรวม" มาเป็น object → ใช้เลย
             const maybe = extractCounts(payload);
             if (maybe) {
               summaryFromApi = maybe;
               break;
             }
 
-            // (ข) ถ้าเป็นรายการ → เก็บไว้ไปคำนวณต่อ
             if (Array.isArray(payload)) {
               bookingsRaw = payload;
               break;
@@ -160,6 +158,7 @@ export default function EmployeeCard({ userId = "" }) {
           setTodaySummary(summaryFromApi);
         } else {
           const bookings = normalizeBookings(bookingsRaw || []);
+
           const isToday = (dt) => {
             if (!dt) return false;
             const t = new Date(dt);
@@ -170,50 +169,48 @@ export default function EmployeeCard({ userId = "" }) {
             );
           };
 
-          const PICKED_KEYWORDS = [
-            "delivered",
-            "picked",
-            "picked_up",
-            "start",
-            "ongoing",
-            "in_use",
-            "success",
-            "done",
-            "complete",
-            "completed",
-          ];
-          const RETURNED_KEYWORDS = [
-            "returned",
-            "dropoff",
-            "handed_back",
-            "success",
-            "done",
-            "complete",
-            "completed",
-          ];
-          const isDelivered = (b) => {
-            const txt = `${b.deliveryStatus} ${b.status}`.toLowerCase();
-            return PICKED_KEYWORDS.some((k) => txt.includes(k));
-          };
-          const isReturned = (b) => {
-            const txt = `${b.returnStatus} ${b.status}`.toLowerCase();
-            return RETURNED_KEYWORDS.some((k) => txt.includes(k));
-          };
-          const isCanceled = (b) =>
-            /cancel/.test(String(b.status || "").toLowerCase());
+          const S = (b) =>
+            String(b.status || "")
+              .toLowerCase()
+              .trim();
+          const isCanceled = (b) => /cancel/.test(S(b));
+          const isInUse = (b) => S(b) === "in use";
+          const isCompleted = (b) => S(b) === "completed";
 
-          const pickups = bookings.filter(
+          const isDeliveredFlag = (b) =>
+            /delivered|picked|pick(ed)?_?up|start|ongoing|in[_\s]?use|success|done|complete/.test(
+              `${b.deliveryStatus || b.pickupStatus || ""}`.toLowerCase()
+            );
+          const isReturnedFlag = (b) =>
+            /returned|dropoff|handed[_\s]?back|success|done|complete/.test(
+              `${b.returnStatus || b.dropoffStatus || ""}`.toLowerCase()
+            );
+
+          const pickupsTodayRaw = bookings.filter(
             (b) => isToday(b.pickupTime) && !isCanceled(b)
           );
-          const returns = bookings.filter(
+          const returnsToday = bookings.filter(
             (b) => isToday(b.returnTime) && !isCanceled(b)
           );
 
+          // ❗ กันซ้ำ: ถ้าจบวันนี้ (completed+returnToday) จะไม่นับฝั่ง pickups
+          const pickupsToday = pickupsTodayRaw.filter(
+            (b) => !(isCompleted(b) && isToday(b.returnTime))
+          );
+
+          const pickupsDoneCount = pickupsToday.filter(
+            (b) => isInUse(b) || (!isInUse(b) && isDeliveredFlag(b))
+          ).length;
+
+          const returnsDoneCount = returnsToday.filter(
+            (b) => isCompleted(b) || (!isCompleted(b) && isReturnedFlag(b))
+          ).length;
+
           setTodaySummary({
-            pickups: pickups.length,
-            pickupsDone: pickups.filter(isDelivered).length,
-            returns: returns.length,
-            returnsDone: returns.filter(isReturned).length,
+            pickups: pickupsToday.length,
+            pickupsDone: pickupsDoneCount,
+            returns: returnsToday.length,
+            returnsDone: returnsDoneCount,
           });
         }
       } catch (e) {
@@ -279,7 +276,6 @@ export default function EmployeeCard({ userId = "" }) {
 
             {/* สรุปวันนี้ */}
             <div className="mt-5 grid grid-cols-4 gap-3">
-              {/* ต้องนำส่ง \n วันนี้ */}
               <div className="rounded-xl border bg-gray-50 p-4 sm:p-5 h-24 flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-500 leading-tight whitespace-pre-line text-center">
                   {"นำส่ง\nวันนี้"}
@@ -289,7 +285,6 @@ export default function EmployeeCard({ userId = "" }) {
                 </div>
               </div>
 
-              {/* นำส่งแล้ว */}
               <div className="rounded-xl border bg-gray-50 p-4 sm:p-5 h-24 flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-500 whitespace-nowrap text-center">
                   นำส่งแล้ว
@@ -299,7 +294,6 @@ export default function EmployeeCard({ userId = "" }) {
                 </div>
               </div>
 
-              {/* ต้องรับคืน \n วันนี้ */}
               <div className="rounded-xl border bg-gray-50 p-4 sm:p-5 h-24 flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-500 leading-tight whitespace-pre-line text-center">
                   {"รับคืน\nวันนี้"}
@@ -309,7 +303,6 @@ export default function EmployeeCard({ userId = "" }) {
                 </div>
               </div>
 
-              {/* ส่งคืนแล้ว */}
               <div className="rounded-xl border bg-gray-50 p-4 sm:p-5 h-24 flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-500 whitespace-nowrap text-center">
                   ส่งคืนแล้ว
@@ -328,11 +321,8 @@ export default function EmployeeCard({ userId = "" }) {
 
 /* ---------------- helpers ---------------- */
 
-/** ดึงยอดจาก object รูปแบบต่าง ๆ (ถ้ามี) */
 function extractCounts(payload) {
   if (!payload || Array.isArray(payload)) return null;
-
-  // เผื่ออยู่ข้างใน key อย่าง today / summary
   const root =
     typeof payload === "object" && (payload.today || payload.summary)
       ? payload.today || payload.summary
@@ -345,7 +335,6 @@ function extractCounts(payload) {
         if (cand in obj && isFinite(obj[cand])) return num(obj[cand]);
       }
     }
-    // ลองไล่ 1 ชั้น
     for (const v of Object.values(obj || {})) {
       if (v && typeof v === "object") {
         for (const k of keys) {
@@ -378,11 +367,10 @@ function extractCounts(payload) {
     find(root, ["returns_done", "returned", "returned_today"]) ?? 0;
 
   const total = pickups + pickupsDone + returns + returnsDone;
-  if (total === 0) return null; // ดูเหมือนไม่ใช่ payload แบบสรุป
+  if (total === 0) return null;
   return { pickups, pickupsDone, returns, returnsDone };
 }
 
-/** แปลงรายการเป็นรูปแบบกลาง */
 function normalizeBookings(list) {
   if (!Array.isArray(list)) return [];
   return list.map((v, i) => {
@@ -439,7 +427,6 @@ function normalizeBookings(list) {
   });
 }
 
-/** รองรับวันที่ไทย / พ.ศ. / ตัวเลขไทย */
 function safeDate(x) {
   if (!x) return null;
   try {
@@ -449,18 +436,14 @@ function safeDate(x) {
     let s = String(x).trim();
     if (!s) return null;
 
-    // แปลงเลขไทย -> อารบิก
     s = s.replace(/[๐-๙]/g, (d) => "0123456789"["๐๑๒๓๔๕๖๗๘๙".indexOf(d)]);
 
-    // เคส ISO/SQL ปกติ
     if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
       s = s.replace("T", " ");
       const d = new Date(s);
       return isNaN(d.getTime()) ? null : d;
     }
 
-    // เคส dd/mm/yyyy (พ.ศ. หรือ ค.ศ.)
-    // รองรับ "18/09/2568 02:37" หรือ "18-09-2568 02:37"
     const m = s.match(
       /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{1,2}))?/
     );
@@ -470,7 +453,7 @@ function safeDate(x) {
       let yyyy = parseInt(m[3], 10);
       const HH = parseInt(m[4] ?? "0", 10);
       const II = parseInt(m[5] ?? "0", 10);
-      if (yyyy >= 2400) yyyy -= 543; // พ.ศ. -> ค.ศ.
+      if (yyyy >= 2400) yyyy -= 543;
       const d = new Date(yyyy, mm - 1, dd, HH, II, 0);
       return isNaN(d.getTime()) ? null : d;
     }
