@@ -1,8 +1,8 @@
 // app/payment/choose/ChoosePaymentClient.js
 "use client";
 
-import { useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useMemo, useState, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getCarById } from "@/data/cars";
@@ -50,6 +50,19 @@ function chooseDateStrings(sp) {
 
 export default function ChoosePaymentClient() {
   const sp = useSearchParams();
+  const router = useRouter();
+
+  // ===== auth guard (frontend only) =====
+  const [userId, setUserId] = useState("");
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  useEffect(() => {
+    try {
+      const uid = localStorage.getItem("vrent_user_id") || "";
+      setUserId(uid);
+      // ถ้าไม่มีผู้ใช้ → โชว์ป๊อปอัปให้ล็อกอิน (ไม่ redirect ทันที)
+      if (!uid) setShowLoginModal(true);
+    } catch {}
+  }, []);
 
   /* ---------- รับพารามิเตอร์ทั้งหมด ---------- */
   const carId = pick(sp, "carId");
@@ -71,7 +84,7 @@ export default function ChoosePaymentClient() {
     chooseDateStrings(sp);
   const name = pick(sp, "name");
   const phone = pick(sp, "phone");
-  const email = pick(sp, "email");
+  const email = pick(sp, "email"); // จะไม่ใช้เป็นตัวตนจริง (แค่โชว์ในสรุปเท่านั้น)
   const note = pick(sp, "note");
 
   const extras = {
@@ -178,8 +191,20 @@ export default function ChoosePaymentClient() {
 
   async function handlePay() {
     if (submitting) return;
+    // 0) ต้องล็อกอินก่อน (กันซ้ำอีกชั้น)
+    if (!userId) {
+      // เด้งป๊อปอัปแทน
+      setShowLoginModal(true);
+      return;
+    }
 
     // ---- VALIDATION ก่อนส่ง ERP ----
+
+    // 0.5) กันเพจถูกเปิดด้วยลิงก์ที่ไม่ครบ
+    if (!carId) {
+      alert("ลิงก์ไม่ถูกต้อง: ไม่พบรหัสรถ");
+      return;
+    }
     // 1) ต้องมีวัน-เวลารับ/คืน
     if (!calcPick || !calcDrop) {
       alert("กรุณาระบุวัน-เวลารับรถและคืนรถให้ครบ");
@@ -200,6 +225,11 @@ export default function ChoosePaymentClient() {
     // 4) ราคาต่อวันต้องมากกว่า 0
     if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
       alert("ราคาต่อวันไม่ถูกต้อง");
+      return;
+    }
+    // 5) ถ้า PromptPay ต้องแนบสลิป
+    if (method === "promptpay" && !slip) {
+      alert("กรุณาอัปโหลดสลิปการชำระเงิน");
       return;
     }
     // ✅ อนุโลม email ที่ไม่มี @ เมื่อไม่ได้จ่ายด้วยบัตร
@@ -224,8 +254,12 @@ export default function ChoosePaymentClient() {
 
       const fd = new FormData();
       fd.append("confirmation_document", key || `WEB-${Date.now()}`);
-      fd.append("customer_name", name || (email ? email.split("@")[0] : ""));
+      // 🔒 ผูกกับผู้ใช้ที่ล็อกอินจากแอปเท่านั้น ไม่ใช้ email จาก query
+      fd.append("customer_name", name || userId.split("@")[0] || "WebUser");
       fd.append("customer_phone", phone || "");
+      // (ถ้าต้องส่งอีเมล ให้ส่ง userId ถ้าเป็นอีเมล; ถ้า userId ไม่ใช่อีเมล ให้ส่งค่าว่าง)
+      const sendEmail = /@/.test(userId) ? userId : "";
+      fd.append("customer_email", sendEmail);
       fd.append(
         "vehicle",
         car?.name || [carBrand, carName].filter(Boolean).join(" ") || "Vehicle"
@@ -308,6 +342,46 @@ export default function ChoosePaymentClient() {
 
   return (
     <>
+      {/* ====== Login Required Modal ====== */}
+      {showLoginModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowLoginModal(false)}
+          />
+          {/* dialog */}
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-900">
+              กรุณาเข้าสู่ระบบ
+            </h3>
+            <p className="mt-1 text-sm text-slate-700">
+              คุณต้องล็อกอินก่อนจึงจะดำเนินการชำระเงินได้
+            </p>
+            <div className="mt-5 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+                onClick={() => setShowLoginModal(false)}
+              >
+                ปิด
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg bg-slate-900 text-white hover:bg-black"
+                onClick={() => {
+                  const next = encodeURIComponent(
+                    location.pathname + location.search
+                  );
+                  router.push(`/Login?next=${next}`);
+                }}
+              >
+                ไปหน้าล็อกอิน
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <section className="bg-white rounded-2xl shadow-lg border border-slate-300 p-6 md:p-8">
         <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
           เลือกวิธีการชำระเงิน
@@ -528,12 +602,7 @@ export default function ChoosePaymentClient() {
             <span>รถ</span>
             <span className="font-medium">{car?.name || "-"}</span>
           </div>
-          <div className="flex justify-between">
-            <span>ผู้ให้บริการ</span>
-            <span className="font-medium">
-              {car?.company?.name || companyName || "-"}
-            </span>
-          </div>
+
           <div className="flex justify-between">
             <span>รับรถ</span>
             <span className="text-right">
@@ -573,10 +642,7 @@ export default function ChoosePaymentClient() {
             <span>ราคารถรวม (x{dayCount})</span>
             <span>฿{fmt(baseTotal)}</span>
           </div>
-          <div className="flex justify-between">
-            <span>ตัวเลือกเสริม</span>
-            <span>฿{fmt(extrasSum)}</span>
-          </div>
+
           <div className="flex justify-between text-lg font-extrabold mt-2">
             <span>รวมทั้งหมด</span>
             <span>฿{fmt(total)}</span>
@@ -596,7 +662,6 @@ export default function ChoosePaymentClient() {
               {passengers ? <div>ผู้โดยสาร: {passengers}</div> : null}
               {ftype ? <div>ประเภทรถ: {ftype}</div> : null}
               {promo ? <div>โค้ดส่วนลด: {promo}</div> : null}
-              {key ? <div>key: {key}</div> : null}
             </div>
           )}
         </div>
