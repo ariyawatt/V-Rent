@@ -389,15 +389,6 @@ export default function BookingPage() {
                   {car.year ? ` • ${car.year}` : ""}{" "}
                   {car.transmission ? ` • ${car.transmission}` : ""}
                 </p>
-                <p className="mt-1 text-sm">
-                  ผู้ให้บริการ:{" "}
-                  <Link
-                    href={`/companies/${car.company?.slug || "partner"}`}
-                    className="font-semibold underline underline-offset-4 hover:text-black"
-                  >
-                    {car.company?.name || "V-Rent Partner"}
-                  </Link>
-                </p>
               </div>
             </div>
 
@@ -495,43 +486,6 @@ export default function BookingPage() {
                     placeholder="you@example.com"
                     autoComplete="email"
                   />
-                </div>
-              </div>
-
-              {/* ตัวเลือกเสริม */}
-              <div className="space-y-2">
-                <p className={labelCls}>ตัวเลือกเสริมต่อวัน</p>
-                <div className="grid sm:grid-cols-3 gap-3 text-sm">
-                  <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">
-                    <input
-                      type="checkbox"
-                      name="extras.childSeat"
-                      checked={form.extras.childSeat}
-                      onChange={handleChange}
-                      className="h-4 w-4 accent-black"
-                    />
-                    Child Seat (+฿120/วัน)
-                  </label>
-                  <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">
-                    <input
-                      type="checkbox"
-                      name="extras.gps"
-                      checked={form.extras.gps}
-                      onChange={handleChange}
-                      className="h-4 w-4 accent-black"
-                    />
-                    GPS (+฿80/วัน)
-                  </label>
-                  <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">
-                    <input
-                      type="checkbox"
-                      name="extras.fullInsurance"
-                      checked={form.extras.fullInsurance}
-                      onChange={handleChange}
-                      className="h-4 w-4 accent-black"
-                    />
-                    Full Insurance (+฿300/วัน)
-                  </label>
                 </div>
               </div>
 

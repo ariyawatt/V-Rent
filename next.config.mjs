@@ -7,8 +7,14 @@ const nextConfig = {
         hostname: "demo.erpeazy.com",
         pathname: "/**",
       },
+      {
+        protocol: "https",
+        hostname: "v-rent-app-916879005749.asia-southeast1.run.app",
+        pathname: "/**",
+      },
       // ถ้ามีโดเมนรูปอื่น ๆ ใส่เพิ่มที่นี่
     ],
+    unoptimized: true,
   },
 };
 

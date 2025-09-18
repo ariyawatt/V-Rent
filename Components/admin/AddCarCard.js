@@ -2,10 +2,36 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
+import { carTypes } from "@/data/carTypes";
 
 const ERP_CREATE_URL =
   "https://demo.erpeazy.com/api/method/erpnext.api.create_vehicle";
 // const ERP_AUTH = "token xxx:yyy";
+
+/* ---------------- helpers ---------------- */
+function normalizeForm(f = {}) {
+  return {
+    name: f.name ?? "",
+    brand: f.brand ?? "",
+    type: f.type ?? "sedan", // ใช้ key 'type' ให้ตรงกันทุกที่
+    transmission: f.transmission ?? "อัตโนมัติ",
+    licensePlate: f.licensePlate ?? "",
+    seats: f.seats ?? "",
+    fuel: f.fuel ?? "เบนซิน",
+    year: f.year ?? "",
+    pricePerDay: f.pricePerDay ?? "",
+    status: f.status ?? "Available", // ค่าอังกฤษเสมอ
+    description: f.description ?? "",
+    company: f.company ?? "",
+    imageData: f.imageData ?? "",
+  };
+}
+
+// เลือกเฉพาะคีย์ที่ “มีค่า” จาก form พาเรนต์มา merge ทับ โดยไม่รีเซ็ตช่องอื่น
+const pickDefined = (obj = {}) =>
+  Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined && v !== null)
+  );
 
 export default function AddCarCard({
   form,
@@ -17,33 +43,41 @@ export default function AddCarCard({
   const internalFileRef = useRef(null);
   const fileRef = externalFileRef ?? internalFileRef;
 
-  // ---------- Local fallback state ----------
+  // ---------- Local form ----------
   const [localForm, setLocalForm] = useState(() => normalizeForm(form));
+
+  // ✅ merge แบบปลอดภัย ไม่เคลียร์ค่าที่ผู้ใช้พิมพ์ไว้
   useEffect(() => {
-    setLocalForm(normalizeForm(form));
+    if (!form || Object.keys(form).length === 0) return;
+    setLocalForm((prev) => ({ ...prev, ...pickDefined(normalizeForm(form)) }));
   }, [form]);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const handleLocalChange = (e) => {
-    const { name, value } = e?.target ?? {};
+  const handleLocalChange = (eOrObj) => {
+    const { name, value } = "target" in eOrObj ? eOrObj.target : eOrObj ?? {};
     if (!name) return;
     setLocalForm((prev) => ({ ...prev, [name]: value ?? "" }));
-    if (typeof onChange === "function") onChange(e);
+    // ส่งขึ้นแบบ lightweight ป้องกันพาเรนต์ reset ทั้งฟอร์ม
+    if (typeof onChange === "function") onChange({ name, value });
   };
 
   const handleLocalImageChange = (e) => {
     const file = e?.target?.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () =>
-        setLocalForm((prev) => ({ ...prev, imageData: String(reader.result) }));
-      reader.readAsDataURL(file);
-    } else {
+    if (!file) {
       setLocalForm((prev) => ({ ...prev, imageData: "" }));
+      onImageChange?.({ file: null, dataUrl: "" });
+      return;
     }
-    if (typeof onImageChange === "function") onImageChange(e);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result);
+      // ✅ อัพเดทเฉพาะ imageData ไม่ยุ่งช่องอื่น
+      setLocalForm((prev) => ({ ...prev, imageData: dataUrl }));
+      onImageChange?.({ file, dataUrl }); // ส่งข้อมูลย่อยขึ้น ไม่ส่ง event ตรงๆ
+    };
+    reader.readAsDataURL(file);
   };
 
   const clearImageInput = () => {
@@ -60,25 +94,23 @@ export default function AddCarCard({
 
       const formData = new FormData();
 
-      // ไฟล์รูป
       const file = fileRef.current?.files?.[0];
       if (file) formData.append("file", file, file.name);
 
-      // ฟิลด์หลักที่ ERP รับ
       formData.append("license_plate", localForm.licensePlate || "");
       formData.append("vehicle_name", localForm.name || "");
 
-      // สถานะ: เก็บ/ส่งเป็นอังกฤษเสมอ
       const status = localForm.status || "Available";
       formData.append("status", status);
 
-      // ราคา (กันกรณี backend ดูคนละคีย์)
       formData.append("price", String(localForm.pricePerDay || 0));
       formData.append("price_per_day", String(localForm.pricePerDay || 0));
 
       formData.append("company", localForm.company || "");
-      formData.append("type", localForm.type || "Sedan");
-      formData.append("v_type", localForm.type || "Sedan");
+      // ✅ ใช้ค่าเดียวกัน
+      formData.append("type", localForm.type || "sedan");
+      formData.append("v_type", localForm.type || "sedan");
+
       formData.append("brand", localForm.brand || "");
       formData.append("seat", String(localForm.seats || ""));
       formData.append("year", String(localForm.year || ""));
@@ -104,8 +136,7 @@ export default function AddCarCard({
 
       clearImageInput();
       alert("เพิ่มรถสำเร็จ");
-      if (typeof onCreated === "function") onCreated();
-      // reload เพื่อให้ลิสต์ฝั่ง admin/CarBox รับข้อมูลใหม่ทันที
+      onCreated?.();
       window.location.reload();
     } catch (err) {
       setError(err?.message || "เพิ่มรถไม่สำเร็จ");
@@ -154,7 +185,7 @@ export default function AddCarCard({
         </div>
         <div className="xl:col-span-2">
           <label className="block text-xs font-semibold text-black mb-1">
-            ประเภท
+            ประเภทรถ
           </label>
           <select
             name="type"
@@ -162,12 +193,11 @@ export default function AddCarCard({
             onChange={handleLocalChange}
             className="w-full rounded-lg border border-gray-400 px-3 py-2 focus:border-black focus:ring-black text-black"
           >
-            <option>Sedan</option>
-            <option>SUV</option>
-            <option>Hatchback</option>
-            <option>Pickup</option>
-            <option>JDM</option>
-            <option>Van</option>
+            {carTypes.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -301,9 +331,7 @@ export default function AddCarCard({
               <button
                 type="button"
                 onClick={() => {
-                  handleLocalChange({
-                    target: { name: "imageData", value: "" },
-                  });
+                  handleLocalChange({ name: "imageData", value: "" });
                   clearImageInput();
                 }}
                 className="mt-2 text-xs text-gray-600 underline"
@@ -353,22 +381,4 @@ export default function AddCarCard({
       </form>
     </div>
   );
-}
-
-function normalizeForm(f = {}) {
-  return {
-    name: f.name ?? "",
-    brand: f.brand ?? "",
-    type: f.type ?? "Sedan",
-    transmission: f.transmission ?? "อัตโนมัติ",
-    licensePlate: f.licensePlate ?? "",
-    seats: f.seats ?? "",
-    fuel: f.fuel ?? "เบนซิน",
-    year: f.year ?? "",
-    pricePerDay: f.pricePerDay ?? "",
-    status: f.status ?? "Available", // ✅ default เป็นอังกฤษ
-    description: f.description ?? "",
-    company: f.company ?? "",
-    imageData: f.imageData ?? "",
-  };
 }

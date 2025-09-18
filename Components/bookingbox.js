@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { carTypes } from "@/data/carTypes";
 
 const carTypeToFType = {
   any: undefined,
@@ -201,14 +202,13 @@ export default function BookingBox({ onSearch }) {
                 name="carType"
                 value={form.carType}
                 onChange={handleChange}
-                className="w-full max-w-full rounded-lg md:rounded-xl border border-gray-500 focus:border-black focus:ring-black px-3 py-2 appearance-none"
+                className="w-full max-w-full rounded-lg border border-gray-500 focus:border-black focus:ring-black px-3 py-2 appearance-none"
               >
-                <option value="any">ไม่ระบุ</option>
-                <option value="eco">Eco / เล็ก</option>
-                <option value="sedan">Sedan</option>
-                <option value="suv">SUV</option>
-                <option value="pickup">กระบะ</option>
-                <option value="van">Van</option>
+                {carTypes.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
               </select>
             </div>
 

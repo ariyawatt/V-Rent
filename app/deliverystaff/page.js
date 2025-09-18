@@ -17,6 +17,7 @@ const cardCls = "bg-white rounded-2xl shadow-lg border border-slate-200";
 const STATUS = {
   pending: { label: "ส่งมอบ", badge: "bg-amber-100 text-amber-800" },
   done: { label: "เสร็จสิ้น", badge: "bg-emerald-100 text-emerald-800" },
+  cancelled: { label: "ยกเลิก", badge: "bg-slate-200 text-slate-700" },
 };
 
 /* ---------- small utils ---------- */
@@ -329,13 +330,22 @@ function AdminDeliveryContent() {
           const pickupISO = row?.pickup_date
             ? new Date(row.pickup_date.replace(" ", "T")).toISOString()
             : "";
-          const raw = (row?.status || "").toLowerCase();
-          const status =
-            raw.includes("done") ||
-            raw.includes("return") ||
-            raw.includes("complete")
-              ? "done"
-              : "pending";
+          const raw = String(row?.status || "")
+            .toLowerCase()
+            .trim();
+          // แปลงเป็นกลุ่มสถานะที่ UI ใช้กรอง
+          const uiStatus = raw.includes("cancel")
+            ? "cancelled"
+            : raw.includes("complete") ||
+              raw.includes("done") ||
+              raw.includes("return")
+            ? "completed"
+            : raw.includes("in use")
+            ? "in use"
+            : // waiting / confirmed -> ถือเป็นรอรับ
+            raw.includes("waiting") || raw.includes("confirm")
+            ? "waiting pickup"
+            : raw || "waiting pickup";
 
           return {
             bookingCode: row?.name || "",
@@ -351,7 +361,8 @@ function AdminDeliveryContent() {
             returnTime: row?.return_date
               ? new Date(row.return_date.replace(" ", "T")).toISOString()
               : "",
-            status,
+            rawStatus: raw,
+            uiStatus,
           };
         });
 
@@ -955,13 +966,23 @@ function TodayQueue({ queue, onPick }) {
         })
       : "-";
 
-  const todayQueue = useMemo(
-    () =>
-      queue.filter(
-        (j) => j.pickupTime && sameDate(new Date(j.pickupTime), new Date())
-      ),
-    [queue]
-  );
+  const todayQueue = useMemo(() => {
+    const now = new Date();
+    return queue.filter((j) => {
+      if (!j.pickupTime) return false;
+      // วันนี้เท่านั้น
+      if (!sameDate(new Date(j.pickupTime), now)) return false;
+      const s = String(j.uiStatus || "").toLowerCase();
+      // ตัด completed / cancelled / in use ออก
+      if (s === "completed" || s === "cancelled" || s === "in use")
+        return false;
+      // รับเฉพาะ waiting pickup และ pickup overdue
+      const pick = new Date(j.pickupTime);
+      const isOverdue = pick < now;
+      const isWaiting = s === "waiting pickup";
+      return isWaiting || (isWaiting && isOverdue);
+    });
+  }, [queue]);
 
   return (
     <div className="mt-4 overflow-x-auto">
@@ -992,7 +1013,7 @@ function TodayQueue({ queue, onPick }) {
               </td>
               <td className="py-2 pr-3">
                 {(() => {
-                  const s = STATUS[j.status] ?? STATUS.pending;
+                  const s = STATUS[j.uiStatus] ?? STATUS.pending;
                   return (
                     <span
                       className={cx(

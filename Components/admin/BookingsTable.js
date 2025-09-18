@@ -1,6 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+
+// ชี้ฐานโดเมน ERP (ปรับได้ผ่าน env)
+const ERP_BASE = process.env.NEXT_PUBLIC_ERP_BASE || "https://demo.erpeazy.com";
+const ERP_AUTH = process.env.NEXT_PUBLIC_ERP_AUTH || ""; // ถ้ามี token ใส่ env นี้
+
+// ───────── Vehicle Stage mapping (UI → API) ─────────
+// ต้องการให้เมื่อสถานะการจอง = "in use" → รถ = "ถูกยืมอยู่"
+const VEHICLE_STAGE_BORROWED = "Maintenance"; // หรือ "In Use" ตามที่ ERP ต้องการ
+
+const VEHICLE_STAGE_COMPLETED = "Maintenance";
+
+// แปลง path ให้เป็น URL เต็ม
+function normalizeFileUrl(u) {
+  if (!u) return "";
+  let s = String(u).trim();
+  if (s.startsWith("//")) s = "https:" + s;
+  if (s.startsWith("/")) s = ERP_BASE.replace(/\/+$/, "") + s;
+  if (!/^https?:\/\//i.test(s)) {
+    s = ERP_BASE.replace(/\/+$/, "") + "/" + s.replace(/^\/+/, "");
+  }
+  return encodeURI(s);
+}
 
 /* ───────── helpers ───────── */
 const toDate = (val) => {
@@ -153,7 +175,7 @@ function normalizeRental(rec) {
     rec?.customer_phone || rec?.phone || rec?.mobile_no || rec?.mobile || "";
 
   const carName =
-    rec?.vehicle || rec?.car_name || rec?.car || rec?.vehicle_name || "-";
+    rec?.car_name || rec?.vehicle_name || rec?.car || rec?.vehicle || "-";
 
   const carPlate = rec?.license_plate || rec?.car_plate || rec?.plate || "";
 
@@ -192,6 +214,16 @@ function normalizeRental(rec) {
     .toLowerCase()
     .trim();
 
+  // เผื่อมี id รถมาจาก ERP
+  const vehicleId =
+    rec?.vehicle_id ||
+    rec?.vehicle_docname ||
+    rec?.vid ||
+    rec?.vehicle_code ||
+    // บางระบบ field "vehicle" คือ docname รถอยู่แล้ว
+    rec?.vehicle ||
+    "";
+
   return {
     id: bookingCode,
     bookingCode,
@@ -213,6 +245,18 @@ function normalizeRental(rec) {
     docType: rec?.id_document_type || "",
     note: rec?.note || "",
     createdAt: rec?.creation || rec?.created_at || "",
+
+    // vehicle id (ถ้ามี)
+    vehicleId,
+
+    // ✅ URL รูปสลิป (แสดงใน DetailModal)
+    receiptUrl: normalizeFileUrl(
+      rec?.payment_receipt ||
+        rec?.receipt ||
+        rec?.payment_slip ||
+        rec?.payment_image ||
+        ""
+    ),
   };
 }
 
@@ -265,6 +309,68 @@ const UI_TO_API_STATUS = {
 const API_TO_UI_STATUS = Object.fromEntries(
   Object.entries(UI_TO_API_STATUS).map(([k, v]) => [v.toLowerCase(), k])
 );
+
+/* ───────── API helpers (เพิ่มส่วนยิงเปลี่ยน Stage รถ) ───────── */
+
+// เปลี่ยนสถานะการเช่าของใบจอง
+async function apiEditRentalStatus(vid, status) {
+  const res = await fetch(
+    `${ERP_BASE}/api/method/erpnext.api.edit_rentals_status`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(ERP_AUTH ? { Authorization: ERP_AUTH } : {}),
+      },
+      credentials: "include",
+      redirect: "follow",
+      body: JSON.stringify({ vid: String(vid), status: String(status) }),
+    }
+  );
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || "เปลี่ยนสถานะไม่สำเร็จ");
+  return text;
+}
+
+// อัปเดตสถานะใบจอง
+async function apiUpdateStatus({ rid, status, payment }) {
+  const fd = new FormData();
+  fd.append("rid", rid);
+  if (status) fd.append("status", status); // "Completed" | "Cancelled" | ...
+  if (typeof payment !== "undefined") fd.append("payment_status", payment); // "Paid" | ""
+  const res = await fetch(`${ERP_BASE}/api/method/erpnext.api.edit_rental`, {
+    method: "POST",
+    body: fd,
+    credentials: "include",
+    headers: {
+      ...(ERP_AUTH ? { Authorization: ERP_AUTH } : {}),
+    },
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || "อัปเดตไม่สำเร็จ");
+  return text;
+}
+
+// ✅ เปลี่ยน Stage ของ "รถ" (ว่าง → ถูกยืมอยู่)
+async function apiEditVehicleStatus({ vid, status }) {
+  const headers = new Headers();
+  headers.append("Content-Type", "application/json");
+  if (ERP_AUTH) headers.append("Authorization", ERP_AUTH);
+
+  const res = await fetch(
+    `${ERP_BASE}/api/method/erpnext.api.edit_vehicle_status`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ vid: String(vid), status: String(status) }),
+      credentials: "include",
+      redirect: "follow",
+    }
+  );
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || "เปลี่ยนสถานะรถไม่สำเร็จ");
+  return text;
+}
 
 /* ───────── Detail Modal ───────── */
 function DetailModal({ open, data, onClose }) {
@@ -360,14 +466,45 @@ function DetailModal({ open, data, onClose }) {
             </div>
           </div>
 
-          {/* สลิป Mockup */}
+          {/* สลิปชำระเงิน */}
           <div className="mt-4">
             <div className="text-xs font-semibold text-black mb-1">
-              สลิปชำระเงิน (Mockup)
+              สลิปชำระเงิน
             </div>
-            <div className="grid place-items-center h-44 border-2 border-dashed rounded-xl text-sm text-gray-400 select-none">
-              — ยังไม่มีสลิป —
-            </div>
+
+            {data.receiptUrl ? (
+              <div className="rounded-xl border border-gray-200 p-3 bg-gray-50">
+                <a
+                  href={data.receiptUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block"
+                  title="เปิดรูปในแท็บใหม่"
+                >
+                  <img
+                    src={data.receiptUrl}
+                    alt="หลักฐานการชำระเงิน"
+                    className="max-h-72 w-auto mx-auto rounded-lg object-contain"
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                  />
+                </a>
+                <div className="mt-2 text-center text-xs text-slate-600 break-all">
+                  <a
+                    href={data.receiptUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    เปิดไฟล์ / ดาวน์โหลด
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="grid place-items-center h-44 border-2 border-dashed rounded-xl text-sm text-gray-400 select-none">
+                — ยังไม่มีสลิป —
+              </div>
+            )}
           </div>
         </div>
 
@@ -395,7 +532,7 @@ function toSQLDateTime(val) {
   )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/* ───────── Edit Modal (เชื่อม API + reload → ❌, อัปเดตสถานะในที่เดียว) ───────── */
+/* ───────── Edit Modal ───────── */
 function EditModal({ open, data, carOptions = [], onClose, onSaved }) {
   const [form, setForm] = useState(data || {});
   const [receiptFile, setReceiptFile] = useState(null);
@@ -453,8 +590,15 @@ function EditModal({ open, data, carOptions = [], onClose, onSaved }) {
       );
 
       const res = await fetch(
-        "https://demo.erpeazy.com/api/method/erpnext.api.edit_rental",
-        { method: "POST", body: fd, credentials: "include" }
+        `${ERP_BASE}/api/method/erpnext.api.edit_rental`,
+        {
+          method: "POST",
+          body: fd,
+          credentials: "include",
+          headers: {
+            ...(ERP_AUTH ? { Authorization: ERP_AUTH } : {}),
+          },
+        }
       );
       const text = await res.text();
       if (!res.ok) throw new Error(text || "อัปเดตไม่สำเร็จ");
@@ -810,13 +954,13 @@ function CompactList({
 /* ───────── ตาราง ───────── */
 export default function BookingsTable({
   bookings = [],
-  carMapById = new Map(),
-  carMapByKey = new Map(),
+  carMapById = new Map(), // { id -> { vid/id/name/plate/... } }
+  carMapByKey = new Map(), // { `${name}|${plate}` (lower) -> { vid/id/name/plate/... } }
   onOpenDetail,
-  onConfirmPickup,
+  onConfirmPickup, // ยัง callback ให้ parent ได้เหมือนเดิม
   onComplete,
   onEdited,
-  onDeleted, // ✅ แจ้ง parent เมื่อลบสำเร็จ (ถ้าส่งมา)
+  onDeleted,
 }) {
   const [remoteRows, setRemoteRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -826,6 +970,9 @@ export default function BookingsTable({
   const [completingId, setCompletingId] = useState("");
   const [cancellingId, setCancellingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
+
+  // กันการยิง stage รถซ้ำ ๆ ต่อคัน
+  const startedSetRef = useRef(new Set()); // key = carKey
 
   // clock
   const [now, setNow] = useState(new Date());
@@ -843,8 +990,13 @@ export default function BookingsTable({
         setLoading(true);
         setErr("");
         const res = await fetch(
-          "https://demo.erpeazy.com/api/method/erpnext.api.get_rentals_overall",
-          { method: "GET", credentials: "include", redirect: "follow" }
+          `${ERP_BASE}/api/method/erpnext.api.get_rentals_overall`,
+          {
+            method: "GET",
+            credentials: "include",
+            redirect: "follow",
+            headers: { ...(ERP_AUTH ? { Authorization: ERP_AUTH } : {}) },
+          }
         );
         const text = await res.text();
         let json;
@@ -876,6 +1028,93 @@ export default function BookingsTable({
     return remoteRows;
   }, [bookings, remoteRows]);
 
+  /* ───────── Vehicle VID Resolver ───────── */
+  const resolveVehicleId = (row) => {
+    // 1) ตรง ๆ จาก record
+    if (row?.vehicleId) return String(row.vehicleId);
+    if (row?.vid) return String(row.vid);
+
+    // 1.1) เดาด้วยชื่อ ถ้าดูเหมือน docname (เช่นขึ้นต้น VR-…)
+    const maybeDoc = String(row?.carName || "").trim();
+    if (/^[A-Z]{2}-\d{2}-\d{2}-\d{2}-\d{4}$/i.test(maybeDoc)) {
+      return maybeDoc;
+    }
+
+    // 2) ลองจาก carMapById ด้วย plate หรือ name
+    if (carMapById && typeof carMapById.forEach === "function") {
+      let found = "";
+      carMapById.forEach((v) => {
+        const plateOk =
+          v?.plate && row?.carPlate && norm(v.plate) === norm(row.carPlate);
+        const nameOk =
+          v?.name && row?.carName && norm(v.name) === norm(row.carName);
+        if ((plateOk || nameOk) && !found) {
+          found = String(v?.vid || v?.id || v?.code || "");
+        }
+      });
+      if (found) return found;
+    }
+
+    // 3) จับคู่ key name|plate
+    if (carMapByKey && typeof carMapByKey.get === "function") {
+      const key1 = `${norm(row?.carName)}|${norm(row?.carPlate)}`;
+      const hit = carMapByKey.get(key1);
+      if (hit) return String(hit?.vid || hit?.id || hit?.code || "");
+    }
+
+    return ""; // not found
+  };
+
+  /* ───────── เมื่อเป็น “กำลังเช่า” ให้เปลี่ยน Stage รถ → ถูกยืมอยู่ ───────── */
+  const ensureVehicleBorrowed = async (row) => {
+    try {
+      const carKey = (
+        resolveVehicleId(row) ||
+        row.carPlate ||
+        row.carName ||
+        ""
+      )
+        .trim()
+        .toLowerCase();
+      if (!carKey) return;
+
+      // กันยิงซ้ำ
+      if (startedSetRef.current.has(carKey)) return;
+
+      // ต้องแน่ใจว่าเป็น in use จริง
+      const life = getLifecycle(row, now);
+      if (life !== "in use") return;
+
+      // หา vid
+      const vid = resolveVehicleId(row);
+      if (!vid) {
+        console.warn("[BookingsTable] ไม่พบ vehicle id สำหรับ", row);
+        return;
+      }
+      console.debug("[BookingsTable] edit_vehicle_status →", {
+        vid,
+        status: VEHICLE_STAGE_BORROWED,
+      });
+      // ยิง API เปลี่ยน Stage รถ
+      await apiEditVehicleStatus({ vid, status: VEHICLE_STAGE_BORROWED });
+
+      // mark กันซ้ำ
+      startedSetRef.current.add(carKey);
+
+      // แจ้ง parent เดิม (ถ้าอยากอัปเดตตารางรถฝั่ง UI ต่อ)
+      onConfirmPickup?.({
+        bookingCode: row.bookingCode,
+        carName: row.carName || "",
+        carPlate: row.carPlate || "",
+        newStageCode: "borrowed",
+        newStageLabel: "ถูกยืมอยู่",
+        vid,
+      });
+    } catch (e) {
+      console.warn("เปลี่ยน Stage รถไม่สำเร็จ:", e?.message || e);
+    }
+  };
+
   /* ฟิลเตอร์ */
   const [q, setQ] = useState("");
   const [statusF, setStatusF] = useState("");
@@ -902,6 +1141,17 @@ export default function BookingsTable({
       return okText && okStatus;
     });
   }, [rows, q, statusF, now]);
+
+  // ✅ เมื่อมี booking ที่อยู่ใน stage "in use" ให้ยิง API เปลี่ยน Stage รถ (ครั้งเดียวต่อคัน)
+  useEffect(() => {
+    filtered.forEach((r) => {
+      if (getLifecycle(r, now) === "in use") {
+        // fire and forget
+        ensureVehicleBorrowed(r);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, now]);
 
   /* edit + detail modal states */
   const [editOpen, setEditOpen] = useState(false);
@@ -934,6 +1184,8 @@ export default function BookingsTable({
 
   const applyEditedLocal = (newRec) => {
     onEdited?.(newRec);
+
+    // อัปเดตในตารางภายใน (กรณีไม่ได้รับ bookings ผ่าน props)
     if (!(Array.isArray(bookings) && bookings.length > 0)) {
       setRemoteRows((prev) =>
         prev.map((r) =>
@@ -942,6 +1194,13 @@ export default function BookingsTable({
             : r
         )
       );
+    }
+
+    // ✅ ถ้าสถานะใหม่เป็น "in use" → ยิง API เปลี่ยน Stage รถ
+    const isInUse =
+      String(newRec?.bookingStatus || "").toLowerCase() === "in use";
+    if (isInUse) {
+      ensureVehicleBorrowed(newRec);
     }
   };
 
@@ -953,51 +1212,23 @@ export default function BookingsTable({
 
   /* ---- handlers: API ---- */
 
-  /* เปลี่ยนสถานะการเช่า (ERP API ใหม่) */
-  const apiEditRentalStatus = async (vid, status) => {
-    const res = await fetch(
-      "https://demo.erpeazy.com/api/method/erpnext.api.edit_rentals_status",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        redirect: "follow",
-        body: JSON.stringify({ vid: String(vid), status: String(status) }),
-      }
-    );
-    const text = await res.text();
-    if (!res.ok) throw new Error(text || "เปลี่ยนสถานะไม่สำเร็จ");
-    return text;
-  };
-
-  const apiUpdateStatus = async ({ rid, status, payment }) => {
-    const fd = new FormData();
-    fd.append("rid", rid);
-    if (status) fd.append("status", status); // "Completed" | "Cancelled" | ...
-    if (typeof payment !== "undefined") fd.append("payment_status", payment); // "Paid" | ""
-    const res = await fetch(
-      "https://demo.erpeazy.com/api/method/erpnext.api.edit_rental",
-      {
-        method: "POST",
-        body: fd,
-        credentials: "include",
-      }
-    );
-    const text = await res.text();
-    if (!res.ok) throw new Error(text || "อัปเดตไม่สำเร็จ");
-  };
-
   const handleComplete = async (b) => {
     try {
       if (!b?.bookingCode) return;
-      setCompletingId(b.bookingCode);
-      await apiUpdateStatus({
-        rid: b.bookingCode,
-        status: "Completed",
-        payment: "Paid",
-      });
 
+      // mark ว่ากำลังทำงาน (เอาไว้ disable ปุ่ม)
+      setCompletingId(b.bookingCode);
+
+
+      // ✅ อัปเดตสถานะการจองใน ERP → Completed
+      // ใช้ API เฉพาะเปลี่ยน status ไม่ต้องส่ง field อื่น
+      await apiEditRentalStatus(b.bookingCode, "Completed");
+
+      // แจ้ง parent callback ถ้ามี
       onComplete?.(b);
+
+      // ✅ อัปเดตใน state local ด้วย (ให้ UI เปลี่ยนเป็น Completed + Paid)
+
 
       if (!(Array.isArray(bookings) && bookings.length > 0)) {
         setRemoteRows((prev) =>
@@ -1011,6 +1242,7 @@ export default function BookingsTable({
     } catch (e) {
       alert("เกิดข้อผิดพลาด: " + (e?.message || e));
     } finally {
+      // clear flag
       setCompletingId("");
     }
   };
@@ -1022,10 +1254,10 @@ export default function BookingsTable({
       if (!ok) return;
       setCancellingId(b.bookingCode);
 
-      // ✅ Push สถานะ "Cancelled" ไป DB
+
       await apiEditRentalStatus(b.bookingCode, "Cancelled");
 
-      // ✅ อัปเดตในตารางทันที
+
       if (!(Array.isArray(bookings) && bookings.length > 0)) {
         setRemoteRows((prev) =>
           prev.map((r) =>
@@ -1072,9 +1304,10 @@ export default function BookingsTable({
 
       const headers = new Headers();
       headers.append("Content-Type", "application/json");
+      if (ERP_AUTH) headers.append("Authorization", ERP_AUTH);
 
       const res = await fetch(
-        "https://demo.erpeazy.com/api/method/erpnext.api.delete_rental",
+        `${ERP_BASE}/api/method/erpnext.api.delete_rental`,
         {
           method: "DELETE",
           headers,
@@ -1190,7 +1423,9 @@ export default function BookingsTable({
             />
           </div>
 
-          {/* จอ md+: ตารางพอดีหน้าต่าง */}
+
+          {/* จอ md ขึ้นไป: ตาราง */}
+
           <div className="mt-4 hidden md:block">
             <table className="w-full table-auto text-sm">
               <thead>
@@ -1226,6 +1461,9 @@ export default function BookingsTable({
                           → {fmtDateTimeLocal(b.returnTime)}
                         </div>
                       </td>
+
+                      {/* รหัส/ลูกค้า/รถ */}
+
                       <td className="py-3 pr-3 font-medium text-black break-words">
                         {b.bookingCode}
                       </td>
@@ -1234,10 +1472,12 @@ export default function BookingsTable({
                         <div className="text-xs text-gray-500">
                           {b.customerPhone}
                         </div>
-                      </td>
+                      </td>{" "}
                       <td className="py-3 pr-3 text-black break-words">
-                        {(b.carName || "—") + " / " + (b.carPlate || "—")}
+                        {(b.carName || "—") + " / " + (b.carPlate || "—")}+{" "}
                       </td>
+
+                      {/* ราคา/วัน / วันเช่า / รวมสุทธิ */}
 
                       <td className="py-3 pr-3 text-right text-black whitespace-nowrap font-mono tabular-nums hidden lg:table-cell">
                         {fmtBaht(b.pricePerDay)}&nbsp;฿
@@ -1249,6 +1489,8 @@ export default function BookingsTable({
                         {fmtBaht(total)}&nbsp;฿
                       </td>
 
+                      {/* ชำระ/สถานะ */}
+
                       <td className="py-3 pr-3 text-black">
                         {life === "cancelled" ? (
                           <BookingBadge value="cancelled" />
@@ -1259,6 +1501,8 @@ export default function BookingsTable({
                       <td className="py-3 pr-3">
                         <BookingBadge value={life} />
                       </td>
+
+                      {/* การจัดการ */}
 
                       <td className="py-3 pr-3">
                         <div className="flex flex-wrap items-center gap-2">
