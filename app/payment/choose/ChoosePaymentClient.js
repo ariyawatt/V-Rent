@@ -280,12 +280,13 @@ export default function ChoosePaymentClient() {
 
       const fd = new FormData();
       fd.append("confirmation_document", key || `WEB-${Date.now()}`);
-      // 🔒 ผูกกับผู้ใช้ที่ล็อกอินจากแอปเท่านั้น ไม่ใช้ email จาก query
-      fd.append("customer_name", name || userId.split("@")[0] || "WebUser");
+      // ✅ ส่ง “ข้อมูลผู้เช่าจริง” ตามที่กรอกในฟอร์ม
+      fd.append("customer_name", name || "");
       fd.append("customer_phone", phone || "");
-      // (ถ้าต้องส่งอีเมล ให้ส่ง userId ถ้าเป็นอีเมล; ถ้า userId ไม่ใช่อีเมล ให้ส่งค่าว่าง)
-      const sendEmail = /@/.test(userId) ? userId : "";
-      fd.append("customer_email", sendEmail);
+      fd.append("customer_email", (email || "").trim());
+
+      // ✅ ส่งผู้ที่ทำรายการ (บัญชีที่ล็อกอิน) แยกต่างหาก เพื่อให้ ERP บันทึกว่าใครเป็นคนจอง
+      fd.append("booked_by_user", userId || "");
       fd.append(
         "vehicle",
         car?.name || [carBrand, carName].filter(Boolean).join(" ") || "Vehicle"

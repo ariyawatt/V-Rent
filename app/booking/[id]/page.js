@@ -10,7 +10,7 @@ import { getCarById } from "@/data/cars";
 
 /* ---------- Helpers ---------- */
 function toLocalDateTimeInputValue(d = new Date()) {
-  const pad = (n) => String(n).padStart(2, "0");
+  const pad = (n) => String(n).toString().padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
     d.getHours()
   )}:${pad(d.getMinutes())}`;
@@ -141,9 +141,9 @@ export default function BookingPage() {
       isoToLocalInput(return_at_iso) ||
       dropoffAt_q ||
       toLocalDateTimeInputValue(defaultDrop),
-    name: get(search, "name"),
-    phone: get(search, "phone"),
-    email: get(search, "email"),
+    name: get(search, "name") || "",
+    phone: get(search, "phone") || "",
+    email: get(search, "email") || "",
     extras: {
       childSeat: toBool(get(search, "childSeat")),
       gps: toBool(get(search, "gps")),
@@ -152,83 +152,58 @@ export default function BookingPage() {
     note: get(search, "note"),
   });
 
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin] = useState(false);
 
-  // Prefill จาก localStorage -> เรียก /api/erp/me พร้อม x-user-id/x-email
+  /* === Autofill จาก user_id (อีเมล) + API erpnext.api.get_user_information === */
   useEffect(() => {
-    let ignore = false;
+    // 1) เอา user_id จาก query หรือ fallback เป็นค่าใน LS
+    const uidFromQuery = get(search, "user_id");
+    let uid = uidFromQuery;
+    if (!uid) {
+      try {
+        uid =
+          localStorage.getItem("vrent_user_id") ||
+          localStorage.getItem("vrent_login_email") ||
+          "";
+      } catch {
+        uid = "";
+      }
+    }
+    uid = (uid || "").trim();
+    if (!uid) return;
 
-    try {
-      const idLS = localStorage.getItem("vrent_user_id") || "";
-      const fullNameLS =
-        localStorage.getItem("vrent_full_name") ||
-        localStorage.getItem("vrent_user_name") ||
-        "";
-      const emailLS =
-        localStorage.getItem("vrent_login_email") ||
-        (idLS.includes("@") ? idLS : "");
-      const phoneLS = localStorage.getItem("vrent_phone") || "";
-      const isAdminLocal =
-        (localStorage.getItem("vrent_is_admin") || "false").toLowerCase() ===
-        "true";
+    // 2) กรอกช่องอีเมลด้วย user_id
+    setForm((prev) => ({ ...prev, email: prev.email || uid }));
 
-      setForm((prev) => ({
-        ...prev,
-        name: prev.name || fullNameLS || "",
-        email: prev.email || emailLS || "",
-        phone: prev.phone || phoneLS || "",
-      }));
-      if (isAdminLocal) setIsAdmin(true);
-    } catch {}
-
+    // 3) ดึงชื่อ/เบอร์จาก API ที่ใช้อยู่จริง
     (async () => {
       try {
-        const userIdLS = (localStorage.getItem("vrent_user_id") || "").trim();
-        const emailLS =
-          (localStorage.getItem("vrent_login_email") || "").trim() ||
-          (localStorage.getItem("vrent_user_id") || "").trim();
-
-        const qp = new URLSearchParams();
-        if (userIdLS) qp.set("user_id", userIdLS);
-        if (emailLS) qp.set("email", emailLS);
-
-        const headers = {};
-        if (userIdLS) headers["x-user-id"] = userIdLS;
-        if (emailLS) headers["x-email"] = emailLS;
-
-        const r = await fetch(`/api/erp/me?${qp.toString()}`, {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          headers,
-        });
+        const r = await fetch(
+          `/erpnext.api.get_user_information?user_id=${encodeURIComponent(
+            uid
+          )}`,
+          { method: "GET", cache: "no-store", credentials: "include" }
+        );
         if (!r.ok) return;
         const j = await r.json();
-        if (ignore || !j?.ok) return;
 
-        const u = j.user || {};
+        // โครงสร้างตามสกรีนช็อต: { message: [fullName, phone, city, tier, avatar, isAdminFlag] }
+        const msg = Array.isArray(j?.message) ? j.message : null;
+        if (!msg) return;
+
+        const fullName = msg[0] || "";
+        const phone = msg[1] || "";
+
         setForm((prev) => ({
           ...prev,
-          name:
-            prev.name || u.fullName || (u.email ? u.email.split("@")[0] : ""),
-          email: prev.email || u.email || "",
-          phone: prev.phone || u.phone || "",
+          name: fullName || prev.name,
+          phone: phone || prev.phone,
         }));
-        setIsAdmin((p) => p || !!u.isAdmin);
-
-        try {
-          if (u.fullName) localStorage.setItem("vrent_full_name", u.fullName);
-          if (u.email) localStorage.setItem("vrent_login_email", u.email);
-          if (u.phone) localStorage.setItem("vrent_phone", u.phone);
-          localStorage.setItem("vrent_is_admin", String(!!u.isAdmin));
-        } catch {}
-      } catch {}
+      } catch {
+        /* noop */
+      }
     })();
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
+  }, [search]);
 
   // ---------- คำนวณราคา ----------
   const dayCount = useMemo(
@@ -357,9 +332,6 @@ export default function BookingPage() {
                   key: <b>{key}</b>
                 </span>
               ) : null}
-              {isAdmin && (
-                <span className="text-green-700 font-semibold">(Admin)</span>
-              )}
             </div>
           </div>
 
@@ -377,12 +349,7 @@ export default function BookingPage() {
               </div>
               <div className="min-w-0">
                 <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-                  {car.name}{" "}
-                  {isAdmin && (
-                    <span className="text-xs align-middle ml-2 px-2 py-0.5 rounded-full bg-green-100 text-green-700">
-                      Admin
-                    </span>
-                  )}
+                  {car.name}
                 </h1>
                 <p className="text-sm md:text-base text-slate-700">
                   {car.brand} {car.brand && car.type ? "•" : ""} {car.type}
@@ -431,7 +398,6 @@ export default function BookingPage() {
                     min={minDateTime}
                     className={inputCls}
                     required
-                    autoComplete="off"
                   />
                 </div>
                 <div className="space-y-2">
@@ -444,7 +410,6 @@ export default function BookingPage() {
                     min={form.pickupAt || minDateTime}
                     className={inputCls}
                     required
-                    autoComplete="off"
                   />
                 </div>
               </div>
@@ -460,7 +425,6 @@ export default function BookingPage() {
                     className={inputCls}
                     placeholder="ชื่อผู้จอง"
                     required
-                    autoComplete="name"
                   />
                 </div>
                 <div className="space-y-2">
@@ -470,9 +434,8 @@ export default function BookingPage() {
                     value={form.phone || ""}
                     onChange={handleChange}
                     className={inputCls}
-                    placeholder="080-000-0000"
+                    placeholder="091-234-5678"
                     required
-                    autoComplete="tel"
                   />
                 </div>
                 <div className="space-y-2">
@@ -484,7 +447,7 @@ export default function BookingPage() {
                     onChange={handleChange}
                     className={inputCls}
                     placeholder="you@example.com"
-                    autoComplete="email"
+                    required
                   />
                 </div>
               </div>
