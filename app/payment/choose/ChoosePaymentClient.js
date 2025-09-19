@@ -48,6 +48,8 @@ function chooseDateStrings(sp) {
   };
 }
 
+const ERP_BASE = process.env.NEXT_PUBLIC_ERP_BASE || "https://demo.erpeazy.com";
+
 export default function ChoosePaymentClient() {
   const sp = useSearchParams();
   const router = useRouter();
@@ -58,9 +60,33 @@ export default function ChoosePaymentClient() {
   useEffect(() => {
     try {
       const uid = localStorage.getItem("vrent_user_id") || "";
-      setUserId(uid);
-      // ถ้าไม่มีผู้ใช้ → โชว์ป๊อปอัปให้ล็อกอิน (ไม่ redirect ทันที)
-      if (!uid) setShowLoginModal(true);
+      if (uid) {
+        setUserId(uid);
+        return;
+      }
+      // ถ้า localStorage ว่าง แต่คุกกี้ ERP อาจยังล็อกอินอยู่ → ขอชื่อผู้ใช้จาก ERP
+      (async () => {
+        try {
+          const r = await fetch(
+            `${ERP_BASE}/api/method/frappe.auth.get_logged_user`,
+            {
+              method: "GET",
+              credentials: "include",
+            }
+          );
+          const j = await r.json().catch(() => ({}));
+          const who = j?.message || "";
+          if (who && who !== "Guest") {
+            localStorage.setItem("vrent_user_id", who);
+            setUserId(who);
+            setShowLoginModal(false);
+            return;
+          }
+          setShowLoginModal(true);
+        } catch {
+          setShowLoginModal(true);
+        }
+      })();
     } catch {}
   }, []);
 

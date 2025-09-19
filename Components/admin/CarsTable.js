@@ -40,9 +40,11 @@ export default function CarsTable({
   getCarRowStatus = (c) => {
     const v = String(c?.status || "").toLowerCase();
     if (v === "in use" || v === "ถูกยืมอยู่") return "ถูกยืมอยู่";
-    if (v === "maintenance" || v === "ซ่อมแซม") return "ซ่อมแซม";
-    return "ว่าง"; // available / undefined
+    if (v === "maintenance" || v === "ซ่อมแซม" || v === "ซ่อมบำรุง")
+      return "ซ่อมบำรุง";
+    return "ว่าง";
   },
+
   apiUrl = "https://demo.erpeazy.com/api/method/erpnext.api.get_vehicles_admin",
   autoFetchIfEmpty = true,
 }) {
@@ -373,7 +375,7 @@ export default function CarsTable({
             <option>ทั้งหมด</option>
             <option>ว่าง</option>
             <option>ถูกยืมอยู่</option>
-            <option>ซ่อมแซม</option>
+            <option>ซ่อมบำรุง</option>
           </select>
           <button
             onClick={clearFilters}
@@ -424,11 +426,13 @@ export default function CarsTable({
               dataForRender.map((c) => {
                 const displayStatus = getCarRowStatus(c, bookings, now);
                 const hideNext = [
+                  "ซ่อมบำรุง",
                   "ซ่อมแซม",
                   "ถูกยืมอยู่",
                   "เลยกำหนดรับ",
                   "เลยกำหนดส่ง",
                 ].includes(displayStatus);
+
                 const nb = hideNext
                   ? null
                   : nextBookingMap[c.id] ||
@@ -652,7 +656,7 @@ export default function CarsTable({
                   {/* ค่าใน ERP จะเป็น EN ก็ได้ เราแปลงทีหลังตอนแสดง */}
                   <option value="Available">ว่าง</option>
                   <option value="In Use">ถูกยืมอยู่</option>
-                  <option value="Maintenance">ซ่อมแซม</option>
+                  <option value="Maintenance">ซ่อมบำรุง</option>
                 </select>
               </div>
 

@@ -31,7 +31,7 @@ const ADMIN_ROLES = new Set([
 const mapStatusToThai = (en) => {
   const v = String(en || "").toLowerCase();
   if (v === "in use") return "ถูกยืมอยู่";
-  if (v === "maintenance") return "ซ่อมแซม";
+  if (v === "maintenance") return "ซ่อมบำรุง";
   return "ว่าง";
 };
 
@@ -143,23 +143,53 @@ export default function AdminPage() {
         const j = await res.json();
         const msg = j?.message ?? j?.data ?? j;
 
-        // ดึง roles จากหลายรูปแบบที่อาจจะเจอได้
+        // ---- ดึง role ให้ robust ----
+        const pickRoles = (arr) =>
+          (Array.isArray(arr) ? arr : [])
+            .map(
+              (r) =>
+                typeof r === "string" ? r : r?.role || r?.name || r?.title || "" // รองรับหลายฟอร์แมต
+            )
+            .filter(Boolean);
+
         let roles = [];
-        if (Array.isArray(msg?.roles)) roles = msg.roles.map(String);
+        if (Array.isArray(msg?.roles)) roles = pickRoles(msg.roles);
         else if (Array.isArray(msg?.user_roles))
-          roles = msg.user_roles.map((r) => r?.role || r).map(String);
+          roles = pickRoles(msg.user_roles);
         else if (Array.isArray(msg?.role_list))
-          roles = msg.role_list.map(String);
+          roles = pickRoles(msg.role_list);
         else if (typeof msg?.role === "string") roles = [msg.role];
 
+        const rolesLC = roles.map((r) => String(r).trim().toLowerCase());
+
+        // flags จากเซิร์ฟเวอร์ (ถ้ามี)
         const isAdminFlag =
           !!msg?.is_admin || !!msg?.is_system_manager || !!msg?.isAdministrator;
 
+        // เคส id เป็น administrator โดยตรง
+        const idIsAdministrator =
+          String(uid || msg?.user || msg?.user_id || "")
+            .trim()
+            .toLowerCase() === "administrator";
+
+        // เช็คชนิด role แบบไม่สนตัวพิมพ์เล็ก-ใหญ่
+        const ADMIN_ROLES_LC = new Set([
+          "administrator",
+          "system manager",
+          "admin",
+          "owner",
+          "manager",
+        ]);
         const hasAdminRole =
           isAdminFlag ||
-          roles.some((r) => ADMIN_ROLES.has(String(r || "").trim()));
+          idIsAdministrator ||
+          rolesLC.some((r) => ADMIN_ROLES_LC.has(r));
 
         setAllowed(hasAdminRole);
+        if (!hasAdminRole) {
+          setAuthError("บัญชีของคุณไม่มีสิทธิ์เข้าถึงหน้าแอดมิน");
+        }
+
         if (!hasAdminRole) {
           setAuthError("บัญชีของคุณไม่มีสิทธิ์เข้าถึงหน้าแอดมิน");
         }

@@ -6,7 +6,7 @@ const EN_TH = {
   // Car status
   available: "ว่าง",
   "in use": "ถูกยืมอยู่",
-  maintenance: "ซ่อมแซม",
+  maintenance: "ซ่อมบำรุง", // ⬅️ เปลี่ยนเป็น “ซ่อมบำรุง”
   "pending delivery": "รอส่ง",
   "pickup overdue": "เลยกำหนดรับ",
   "return overdue": "เลยกำหนดส่ง",
@@ -23,7 +23,8 @@ const TH_EN = {
   // Car
   ว่าง: "available",
   ถูกยืมอยู่: "in use",
-  ซ่อมแซม: "maintenance",
+  ซ่อมบำรุง: "maintenance", // ⬅️ รองรับคำใหม่
+  ซ่อมแซม: "maintenance", // ⬅️ คงคำเก่าไว้เพื่อความเข้ากันได้
   รอส่ง: "pending delivery",
   เลยกำหนดรับ: "pickup overdue",
   เลยกำหนดส่ง: "return overdue",
@@ -48,6 +49,8 @@ function canonical(raw = "") {
   if (x === "rented") return "in use";
   if (x === "overdue pickup") return "pickup overdue";
   if (x === "overdue return") return "return overdue";
+  // เผื่อสะกดผิดบ่อย ๆ
+  if (x === "maintainance") return "maintenance";
   // คีย์ที่เราจะ “ตัดออก” ถ้ามาเป็นสถานะนี้
   if (["pending payment", "pending", "unpaid"].includes(x))
     return "pending payment";
@@ -74,7 +77,7 @@ function colorForStatus(en) {
     case "in use":
       return "bg-red-100 text-red-800";
     case "maintenance":
-      return "bg-amber-100 text-amber-800";
+      return "bg-amber-100 text-amber-800"; // ⬅️ สีเหลือง (amber)
     case "pending delivery":
       return "bg-blue-100 text-blue-800";
     case "pickup overdue":
