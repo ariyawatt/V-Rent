@@ -39,13 +39,29 @@ export default function CarsTable({
 
   // ✅ default แปลง EN/TH → TH (robust)
   getCarRowStatus = (c) => {
-    const raw0 = (c?.status ?? "").toString().normalize("NFKC");
-    const raw = raw0
+    // เลือกค่าที่ “ไม่ว่างจริงๆ” ตัวแรกจากหลายคีย์
+    const firstNonEmpty = (...xs) =>
+      xs.find(
+        (s) =>
+          String(s ?? "")
+            .replace(/\u00A0|\u200B|\u200C|\u200D/g, "")
+            .trim().length > 0
+      );
+
+    const raw0 = firstNonEmpty(
+      c?.status,
+      c?.stage,
+      c?.vehicle_stage,
+      c?.car_status,
+      c?.status_text,
+      ""
+    );
+    const raw = String(raw0)
+      .normalize("NFKC")
       .replace(/\u00A0|\u200B|\u200C|\u200D/g, " ") // NBSP/ZWSP → space
       .trim()
       .toLowerCase()
       .replace(/\s+/g, " "); // squeeze spaces
-
     const compact = raw.replace(/\s+/g, ""); // "inrent", "inuse" etc.
 
     // ถูกจอง
@@ -55,9 +71,8 @@ export default function CarsTable({
       raw === "ถูกจอง" ||
       raw === "reserved" ||
       raw === "booked"
-    ) {
+    )
       return "ถูกจอง";
-    }
 
     // กำลังใช้งาน
     if (
@@ -66,19 +81,17 @@ export default function CarsTable({
       raw === "ถูกยืมอยู่" ||
       raw === "กำลังเช่า" ||
       raw === "rented"
-    ) {
+    )
       return "ถูกยืมอยู่";
-    }
 
     // ซ่อมบำรุง
     if (
       raw === "maintenance" ||
-      raw === "maintainance" || // misspell
+      raw === "maintainance" ||
       raw === "ซ่อมบำรุง" ||
       raw === "ซ่อมแซม"
-    ) {
+    )
       return "ซ่อมบำรุง";
-    }
 
     // ว่าง
     if (raw === "available" || raw === "ว่าง") return "ว่าง";
@@ -170,7 +183,7 @@ export default function CarsTable({
       year: String(car?.year ?? ""),
       pricePerDay: String(car?.pricePerDay ?? 0),
       // TIP: field status เก็บอะไรก็ได้ (EN/TH) — เราจะแปลงตอนโชว์/กรองด้วย getCarRowStatus
-      status: car?.status ?? "ว่าง",
+      status: toEN(car?.status ?? "Available"),
       company: car?.company || "",
       description: car?.description ?? "",
       // ✅ รูปปัจจุบัน normalize ให้เป็น URL เต็ม (รองรับ /files/xxx)
@@ -495,7 +508,16 @@ export default function CarsTable({
                       {fmtBaht(Number(c.pricePerDay || 0))} ฿
                     </td>
                     <td className="py-3 pr-3">
-                      <StatusBadge value={displayStatus || "ว่าง"} />
+                      <StatusBadge
+                        value={
+                          displayStatus ||
+                          c.status ||
+                          c.stage ||
+                          c.vehicle_stage ||
+                          c.car_status ||
+                          "ว่าง"
+                        }
+                      />
                     </td>
                     <td className="py-3 pr-3">
                       {nb ? (
@@ -834,6 +856,23 @@ export default function CarsTable({
   );
 }
 
+const toEN = (s) => {
+  const x = String(s ?? "")
+    .normalize("NFKC")
+    .replace(/\u00A0|\u200B|\u200C|\u200D/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  if (["in rent", "inrent", "reserved", "booked", "ถูกจอง"].includes(x))
+    return "In Rent";
+  if (["in use", "inuse", "rented", "กำลังเช่า", "ถูกยืมอยู่"].includes(x))
+    return "In Use";
+  if (["maintenance", "maintainance", "ซ่อมบำรุง", "ซ่อมแซม"].includes(x))
+    return "Maintenance";
+  if (["available", "ว่าง"].includes(x)) return "Available";
+  return "Available";
+};
+
 /* helpers */
 
 function initCar() {
@@ -897,7 +936,13 @@ function mapVehicleObject(v) {
     brand: v.brand || v.make || "",
     licensePlate: (v.license_plate || v.plate || v.licensePlate || "").trim(),
     pricePerDay: priceNum,
-    status: v.status || "ว่าง",
+    status:
+      v.status ||
+      v.stage ||
+      v.vehicle_stage ||
+      v.car_status ||
+      v.status_text ||
+      "ว่าง",
     // รองรับหลายคีย์จาก backend
     type: v.type || v.v_type || v.ftype || v.category || "Sedan",
     transmission: v.transmission || v.gear_system || "อัตโนมัติ", // <- รองรับ gear_system

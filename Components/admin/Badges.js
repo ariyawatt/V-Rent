@@ -86,7 +86,7 @@ function colorForStatus(en) {
     case "available":
       return "bg-green-100 text-green-800";
     case "in rent":
-      return "bg-red-100 text-red-800";
+      return "bg-cyan-100 text-cyan-800";
     case "in use":
       return "bg-red-100 text-red-800";
     case "maintenance":
