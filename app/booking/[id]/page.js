@@ -299,6 +299,7 @@ export default function BookingPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-900">
+      <title>BookingPage - V-Rent</title>
       <Headers />
 
       <main className="flex-grow">

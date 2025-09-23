@@ -77,6 +77,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col min-h-screen">
+      <title>MainPage - V-Rent</title>
       <HeaderBar />
       <main className="flex-grow bg-white">
         <div className="min-h-screen bg-gray-100 p-6">

@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/FooterMinimal";
-import Link from "next/link";
 
 export default function Signup() {
   const router = useRouter();
@@ -103,8 +102,8 @@ export default function Signup() {
 
   return (
     <div className="min-h-screen flex flex-col bg-black text-slate-200">
+      <title>Signup - V-Rent</title>
       <Headers />
-
       {/* background aurora / glow */}
       <div
         aria-hidden

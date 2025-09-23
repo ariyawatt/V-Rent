@@ -1144,6 +1144,7 @@ export default function DeliveryStaffPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-white text-slate-900">
+      <title>Delivery Staff - V-Rent</title>
       <HeaderAd />
       <main className="flex-grow">
         {auth.loading ? (

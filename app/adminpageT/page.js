@@ -306,6 +306,7 @@ export default function AdminPage() {
   // ===== Allowed UI (ของเดิม) =====
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
+      <title>AdminPage - V-Rent</title>
       <Headers />
       {/* ลด margin ซ้ายขวาเล็กน้อย */}
       <main className="flex-1 px-2 md:px-4 py-6">

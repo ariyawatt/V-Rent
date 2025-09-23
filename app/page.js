@@ -3,6 +3,7 @@ import Link from "next/link";
 export default function Home() {
   return (
     <div className="relative min-h-screen bg-black flex flex-col items-center justify-center px-6">
+      <title>V-Rent</title>
       {/* ข้อความตรงกลาง */}
       <h1 className="text-6xl sm:text-7xl md:text-8xl font-extrabold text-white text-center mb-16">
         V-Rent

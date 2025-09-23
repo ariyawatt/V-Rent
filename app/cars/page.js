@@ -1,14 +1,15 @@
 // app/cars/page.js
 // ไฟล์นี้เป็น Server Component โดยค่าเริ่มต้น
 
-import { Suspense } from 'react';
+import { Suspense } from "react";
 import Headers from "@/Components/Header";
 import Footer from "@/Components/Footer";
-import CarsPageContent from './CarsPageContent'; // Import Client Component ที่สร้างใหม่
+import CarsPageContent from "./CarsPageContent"; // Import Client Component ที่สร้างใหม่
 
 export default function CarsPage() {
   return (
     <div className="flex min-h-screen flex-col">
+      <title>CarsBoxPage - V-Rent</title>
       <Headers />
       <main className="flex-1">
         <section className="p-6 sm:p-8 lg:p-10 text-white bg-black">
