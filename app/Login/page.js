@@ -194,7 +194,7 @@ export default function Login() {
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="administrator หรือ you@domain.com"
+                      placeholder="you@domain.com"
                       autoComplete="username"
                       className="w-full rounded-xl border border-white/10 bg-[#0F1530]/60 px-10 py-3 text-sm placeholder:text-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
                     />

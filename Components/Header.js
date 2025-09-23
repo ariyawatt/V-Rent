@@ -139,13 +139,13 @@ export default function Header() {
       <div className="flex items-center space-x-3">
         {userId ? (
           <>
-            <Link
-              href="/profile"
-              className="px-3 py-1.5 text-sm text-gray-300 rounded-md bg-gray-800 hover:bg-gray-700 transition-colors"
-              title="ไปหน้าโปรไฟล์"
+            <span
+              className="px-3 py-1.5 text-sm text-gray-300 rounded-md bg-gray-800 cursor-default select-none"
+              title="ชื่อผู้ใช้"
             >
               {displayName || userId}
-            </Link>
+            </span>
+
             <button
               onClick={handleSignOut}
               disabled={signingOut}
