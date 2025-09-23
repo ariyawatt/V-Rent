@@ -36,12 +36,54 @@ export default function CarsTable({
   nextBookingMap = {},
   onEdit,
   onDelete,
-  // ✅ default แปลง EN → TH เพื่อให้โชว์/กรองตรงกัน
+
+  // ✅ default แปลง EN/TH → TH (robust)
   getCarRowStatus = (c) => {
-    const v = String(c?.status || "").toLowerCase();
-    if (v === "in use" || v === "ถูกยืมอยู่") return "ถูกยืมอยู่";
-    if (v === "maintenance" || v === "ซ่อมแซม" || v === "ซ่อมบำรุง")
+    const raw0 = (c?.status ?? "").toString().normalize("NFKC");
+    const raw = raw0
+      .replace(/\u00A0|\u200B|\u200C|\u200D/g, " ") // NBSP/ZWSP → space
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " "); // squeeze spaces
+
+    const compact = raw.replace(/\s+/g, ""); // "inrent", "inuse" etc.
+
+    // ถูกจอง
+    if (
+      raw === "in rent" ||
+      compact === "inrent" ||
+      raw === "ถูกจอง" ||
+      raw === "reserved" ||
+      raw === "booked"
+    ) {
+      return "ถูกจอง";
+    }
+
+    // กำลังใช้งาน
+    if (
+      raw === "in use" ||
+      compact === "inuse" ||
+      raw === "ถูกยืมอยู่" ||
+      raw === "กำลังเช่า" ||
+      raw === "rented"
+    ) {
+      return "ถูกยืมอยู่";
+    }
+
+    // ซ่อมบำรุง
+    if (
+      raw === "maintenance" ||
+      raw === "maintainance" || // misspell
+      raw === "ซ่อมบำรุง" ||
+      raw === "ซ่อมแซม"
+    ) {
       return "ซ่อมบำรุง";
+    }
+
+    // ว่าง
+    if (raw === "available" || raw === "ว่าง") return "ว่าง";
+
+    // ไม่รู้จัก → ว่าง (กัน UI พัง)
     return "ว่าง";
   },
 
@@ -374,6 +416,7 @@ export default function CarsTable({
           >
             <option>ทั้งหมด</option>
             <option>ว่าง</option>
+            <option>ถูกจอง</option>
             <option>ถูกยืมอยู่</option>
             <option>ซ่อมบำรุง</option>
           </select>
@@ -429,6 +472,7 @@ export default function CarsTable({
                   "ซ่อมบำรุง",
                   "ซ่อมแซม",
                   "ถูกยืมอยู่",
+                  "ถูกจอง",
                   "เลยกำหนดรับ",
                   "เลยกำหนดส่ง",
                 ].includes(displayStatus);
@@ -438,7 +482,8 @@ export default function CarsTable({
                   : nextBookingMap[c.id] ||
                     nextBookingMap[c.licensePlate || c.name] ||
                     null;
-
+                // // ใน map ของตาราง ก่อน return <tr>
+                // console.log("row", { rawStatus: c.status, displayStatus });
                 return (
                   <tr key={String(c.id)}>
                     <td className="py-3 pr-3">{c._idx + 1}</td>
@@ -656,6 +701,7 @@ export default function CarsTable({
                   {/* ค่าใน ERP จะเป็น EN ก็ได้ เราแปลงทีหลังตอนแสดง */}
                   <option value="Available">ว่าง</option>
                   <option value="In Use">ถูกยืมอยู่</option>
+                  <option value="In Rent">ถูกจอง</option>
                   <option value="Maintenance">ซ่อมบำรุง</option>
                 </select>
               </div>
