@@ -66,20 +66,20 @@ export default function Header() {
     <header className="w-full bg-black text-white px-6 py-4 flex items-center justify-between shadow-md">
       {/* ด้านซ้าย */}
       <div className="text-2xl font-bold">
-        <Link href="/">V-Rent-Admin</Link>
+        <Link href="/adminpageT">V-Rent-Admin</Link>
       </div>
 
       {/* ด้านขวา */}
       <div className="flex items-center space-x-3">
         {userId ? (
           <>
-            <Link
-              href="/profile"
-              className="px-3 py-1.5 text-sm text-gray-300 rounded-md bg-gray-800 hover:bg-gray-700 transition-colors"
-              title="ไปหน้าโปรไฟล์"
+            <span
+              className="px-3 py-1.5 text-sm text-gray-300 rounded-md bg-gray-800 cursor-default select-none"
+              title="ชื่อผู้ใช้"
             >
               {displayName || userId}
-            </Link>
+            </span>
+
             <button
               onClick={handleSignOut}
               disabled={signingOut}

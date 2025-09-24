@@ -204,6 +204,7 @@ export default function CarInfo() {
 
   return (
     <div className="flex flex-col min-h-screen bg-white">
+      <title>CarsInfoPage - V-Rent</title>
       <Headers />
 
       <main className="flex-grow bg-gray-100 grid content-center">

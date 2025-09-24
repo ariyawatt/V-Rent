@@ -1,3 +1,6 @@
+// // บรรทัดบนสุดของ Badges.jsx
+// console.log("Badges.jsx loaded v2 - has inrent & booked mapping");
+
 // components/admin/Badges.jsx
 import { cls } from "./utils";
 
@@ -5,8 +8,9 @@ import { cls } from "./utils";
 const EN_TH = {
   // Car status
   available: "ว่าง",
+  "in rent": "ถูกจอง",
   "in use": "ถูกยืมอยู่",
-  maintenance: "ซ่อมแซม",
+  maintenance: "ซ่อมบำรุง", // ⬅️ เปลี่ยนเป็น “ซ่อมบำรุง”
   "pending delivery": "รอส่ง",
   "pickup overdue": "เลยกำหนดรับ",
   "return overdue": "เลยกำหนดส่ง",
@@ -23,7 +27,9 @@ const TH_EN = {
   // Car
   ว่าง: "available",
   ถูกยืมอยู่: "in use",
-  ซ่อมแซม: "maintenance",
+  ถูกจอง: "in rent",
+  ซ่อมบำรุง: "maintenance", // ⬅️ รองรับคำใหม่
+  ซ่อมแซม: "maintenance", // ⬅️ คงคำเก่าไว้เพื่อความเข้ากันได้
   รอส่ง: "pending delivery",
   เลยกำหนดรับ: "pickup overdue",
   เลยกำหนดส่ง: "return overdue",
@@ -45,9 +51,17 @@ const normalize = (s = "") => lc(s).replace(/[_-]+/g, " ");
 function canonical(raw = "") {
   const x = normalize(raw);
   if (TH_EN[x]) return TH_EN[x];
+
+  // Car status EN variants
+  if (x === "in rent" || x === "inrent") return "in rent"; // ⬅️ รองรับทั้งมี/ไม่มีช่องว่าง
   if (x === "rented") return "in use";
+  if (x === "reserved" || x === "booked") return "in rent"; // ⬅️ synonym
   if (x === "overdue pickup") return "pickup overdue";
   if (x === "overdue return") return "return overdue";
+
+  // เผื่อสะกดผิดบ่อย ๆ
+  if (x === "maintainance") return "maintenance";
+
   // คีย์ที่เราจะ “ตัดออก” ถ้ามาเป็นสถานะนี้
   if (["pending payment", "pending", "unpaid"].includes(x))
     return "pending payment";
@@ -71,10 +85,12 @@ function colorForStatus(en) {
   switch (en) {
     case "available":
       return "bg-green-100 text-green-800";
+    case "in rent":
+      return "bg-cyan-100 text-cyan-800";
     case "in use":
       return "bg-red-100 text-red-800";
     case "maintenance":
-      return "bg-amber-100 text-amber-800";
+      return "bg-amber-100 text-amber-800"; // ⬅️ สีเหลือง (amber)
     case "pending delivery":
       return "bg-blue-100 text-blue-800";
     case "pickup overdue":

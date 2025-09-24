@@ -26,15 +26,33 @@ export default function Header() {
 
   async function hydrateFromERP() {
     try {
-      const r = await fetch(
-        `${ERP_BASE}/api/method/erpnext.api.get_user_information`,
-        {
-          method: "GET",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-          cache: "no-store",
+      // 1) หา user จาก localStorage; ถ้าไม่มีให้ถาม ERP ก่อน
+      let uid = localStorage.getItem("vrent_user_id") || "";
+      if (!uid) {
+        const whoRes = await fetch(
+          `${ERP_BASE}/api/method/frappe.auth.get_logged_user`,
+          { method: "GET", credentials: "include", cache: "no-store" }
+        );
+        const whoJson = await whoRes.json().catch(() => ({}));
+        const who = whoJson?.message || "";
+        if (who && who !== "Guest") {
+          uid = who;
+          localStorage.setItem("vrent_user_id", uid);
         }
+      }
+      if (!uid) return; // ❗ ไม่มีผู้ใช้ก็ไม่ต้องเรียกต่อ
+
+      // 2) เรียก get_user_information พร้อม query user_id
+      const u = new URL(
+        `${ERP_BASE}/api/method/erpnext.api.get_user_information`
       );
+      u.searchParams.set("user_id", uid);
+      const r = await fetch(u.toString(), {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
       if (!r.ok) return;
 
       const data = await r.json();
@@ -46,31 +64,27 @@ export default function Header() {
         first || last
           ? [first, last].filter(Boolean).join(" ")
           : msg.full_name || msg.fullname || msg.name || "";
+      const email = msg.email || msg.user || msg.user_id || msg.username || uid;
 
-      const email = msg.email || msg.user || msg.user_id || msg.username || "";
-
-      // <<< แก้ตรงนี้: ไม่มี type annotation แล้ว >>>
       const rolesRaw = msg.roles || [];
       const roles = Array.isArray(rolesRaw)
         ? rolesRaw
-            .map((r) => (typeof r === "string" ? r : r && r.role))
+            .map((r) => (typeof r === "string" ? r : r?.role))
             .filter(Boolean)
         : [];
-
       const isAdmin =
-        String(msg.user_id || msg.user || "").toLowerCase() ===
-          "administrator" ||
+        String(email).toLowerCase() === "administrator" ||
         roles.some((r) => /^(Administrator|System Manager)$/i.test(String(r)));
 
       if (email) localStorage.setItem("vrent_user_id", email);
       if (fullName) localStorage.setItem("vrent_full_name", fullName);
       localStorage.setItem("vrent_is_admin", String(isAdmin));
 
-      const { uid, name } = computeFromStorage();
-      setUserId(uid);
+      const { uid: sUid, name } = computeFromStorage();
+      setUserId(sUid);
       setDisplayName(name);
-    } catch {
-      // ไม่มี session ก็ปล่อยผ่าน
+    } catch (e) {
+      // ไม่มี session/เรียกไม่สำเร็จ ก็ข้ามไปเงียบ ๆ
     }
   }
 
@@ -125,13 +139,13 @@ export default function Header() {
       <div className="flex items-center space-x-3">
         {userId ? (
           <>
-            <Link
-              href="/profile"
-              className="px-3 py-1.5 text-sm text-gray-300 rounded-md bg-gray-800 hover:bg-gray-700 transition-colors"
-              title="ไปหน้าโปรไฟล์"
+            <span
+              className="px-3 py-1.5 text-sm text-gray-300 rounded-md bg-gray-800 cursor-default select-none"
+              title="ชื่อผู้ใช้"
             >
               {displayName || userId}
-            </Link>
+            </span>
+
             <button
               onClick={handleSignOut}
               disabled={signingOut}

@@ -140,9 +140,6 @@ export default function BookingBox({ onSearch }) {
             <h2 className="text-lg sm:text-xl md:text-2xl font-extrabold tracking-tight">
               ค้นหายานพาหนะ
             </h2>
-            <Link href="/help" className="text-xs sm:text-sm hover:underline">
-              ต้องการความช่วยเหลือ?
-            </Link>
           </div>
 
           {/* Grid Fields */}

@@ -36,13 +36,70 @@ export default function CarsTable({
   nextBookingMap = {},
   onEdit,
   onDelete,
-  // ✅ default แปลง EN → TH เพื่อให้โชว์/กรองตรงกัน
+
+  // ✅ default แปลง EN/TH → TH (robust)
   getCarRowStatus = (c) => {
-    const v = String(c?.status || "").toLowerCase();
-    if (v === "in use" || v === "ถูกยืมอยู่") return "ถูกยืมอยู่";
-    if (v === "maintenance" || v === "ซ่อมแซม") return "ซ่อมแซม";
-    return "ว่าง"; // available / undefined
+    // เลือกค่าที่ “ไม่ว่างจริงๆ” ตัวแรกจากหลายคีย์
+    const firstNonEmpty = (...xs) =>
+      xs.find(
+        (s) =>
+          String(s ?? "")
+            .replace(/\u00A0|\u200B|\u200C|\u200D/g, "")
+            .trim().length > 0
+      );
+
+    const raw0 = firstNonEmpty(
+      c?.status,
+      c?.stage,
+      c?.vehicle_stage,
+      c?.car_status,
+      c?.status_text,
+      ""
+    );
+    const raw = String(raw0)
+      .normalize("NFKC")
+      .replace(/\u00A0|\u200B|\u200C|\u200D/g, " ") // NBSP/ZWSP → space
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " "); // squeeze spaces
+    const compact = raw.replace(/\s+/g, ""); // "inrent", "inuse" etc.
+
+    // ถูกจอง
+    if (
+      raw === "in rent" ||
+      compact === "inrent" ||
+      raw === "ถูกจอง" ||
+      raw === "reserved" ||
+      raw === "booked"
+    )
+      return "ถูกจอง";
+
+    // กำลังใช้งาน
+    if (
+      raw === "in use" ||
+      compact === "inuse" ||
+      raw === "ถูกยืมอยู่" ||
+      raw === "กำลังเช่า" ||
+      raw === "rented"
+    )
+      return "ถูกยืมอยู่";
+
+    // ซ่อมบำรุง
+    if (
+      raw === "maintenance" ||
+      raw === "maintainance" ||
+      raw === "ซ่อมบำรุง" ||
+      raw === "ซ่อมแซม"
+    )
+      return "ซ่อมบำรุง";
+
+    // ว่าง
+    if (raw === "available" || raw === "ว่าง") return "ว่าง";
+
+    // ไม่รู้จัก → ว่าง (กัน UI พัง)
+    return "ว่าง";
   },
+
   apiUrl = "https://demo.erpeazy.com/api/method/erpnext.api.get_vehicles_admin",
   autoFetchIfEmpty = true,
 }) {
@@ -126,7 +183,7 @@ export default function CarsTable({
       year: String(car?.year ?? ""),
       pricePerDay: String(car?.pricePerDay ?? 0),
       // TIP: field status เก็บอะไรก็ได้ (EN/TH) — เราจะแปลงตอนโชว์/กรองด้วย getCarRowStatus
-      status: car?.status ?? "ว่าง",
+      status: toEN(car?.status ?? "Available"),
       company: car?.company || "",
       description: car?.description ?? "",
       // ✅ รูปปัจจุบัน normalize ให้เป็น URL เต็ม (รองรับ /files/xxx)
@@ -372,8 +429,9 @@ export default function CarsTable({
           >
             <option>ทั้งหมด</option>
             <option>ว่าง</option>
+            <option>ถูกจอง</option>
             <option>ถูกยืมอยู่</option>
-            <option>ซ่อมแซม</option>
+            <option>ซ่อมบำรุง</option>
           </select>
           <button
             onClick={clearFilters}
@@ -424,17 +482,21 @@ export default function CarsTable({
               dataForRender.map((c) => {
                 const displayStatus = getCarRowStatus(c, bookings, now);
                 const hideNext = [
+                  "ซ่อมบำรุง",
                   "ซ่อมแซม",
                   "ถูกยืมอยู่",
+                  "ถูกจอง",
                   "เลยกำหนดรับ",
                   "เลยกำหนดส่ง",
                 ].includes(displayStatus);
+
                 const nb = hideNext
                   ? null
                   : nextBookingMap[c.id] ||
                     nextBookingMap[c.licensePlate || c.name] ||
                     null;
-
+                // // ใน map ของตาราง ก่อน return <tr>
+                // console.log("row", { rawStatus: c.status, displayStatus });
                 return (
                   <tr key={String(c.id)}>
                     <td className="py-3 pr-3">{c._idx + 1}</td>
@@ -446,7 +508,16 @@ export default function CarsTable({
                       {fmtBaht(Number(c.pricePerDay || 0))} ฿
                     </td>
                     <td className="py-3 pr-3">
-                      <StatusBadge value={displayStatus || "ว่าง"} />
+                      <StatusBadge
+                        value={
+                          displayStatus ||
+                          c.status ||
+                          c.stage ||
+                          c.vehicle_stage ||
+                          c.car_status ||
+                          "ว่าง"
+                        }
+                      />
                     </td>
                     <td className="py-3 pr-3">
                       {nb ? (
@@ -651,8 +722,9 @@ export default function CarsTable({
                 >
                   {/* ค่าใน ERP จะเป็น EN ก็ได้ เราแปลงทีหลังตอนแสดง */}
                   <option value="Available">ว่าง</option>
+                  <option value="Reserved">ถูกจอง</option>
                   <option value="In Use">ถูกยืมอยู่</option>
-                  <option value="Maintenance">ซ่อมแซม</option>
+                  <option value="Maintenance">ซ่อมบำรุง</option>
                 </select>
               </div>
 
@@ -784,6 +856,32 @@ export default function CarsTable({
   );
 }
 
+const toEN = (s) => {
+  const x0 = String(s ?? "")
+    .normalize("NFKC")
+    .replace(/\u00A0|\u200B|\u200C|\u200D/g, " ")
+    .trim()
+    .toLowerCase();
+  const compact = x0.replace(/\s+/g, "");
+
+  // ถูกจอง → Reserved (canonical)
+  if (
+    ["in rent", "reserved", "booked", "ถูกจอง"].includes(x0) ||
+    compact === "inrent"
+  )
+    return "Reserved";
+  // กำลังเช่า → In Use (canonical)
+  if (
+    ["in use", "rented", "กำลังเช่า", "ถูกยืมอยู่"].includes(x0) ||
+    compact === "inuse"
+  )
+    return "In Use";
+  if (["maintenance", "maintainance", "ซ่อมบำรุง", "ซ่อมแซม"].includes(x0))
+    return "Maintenance";
+  if (["available", "ว่าง"].includes(x0)) return "Available";
+  return "Available";
+};
+
 /* helpers */
 
 function initCar() {
@@ -799,7 +897,7 @@ function initCar() {
     fuel: "เบนซิน",
     year: "",
     pricePerDay: "0",
-    status: "ว่าง",
+    status: "Available",
     company: "",
     description: "",
     imageData: "",
@@ -847,7 +945,13 @@ function mapVehicleObject(v) {
     brand: v.brand || v.make || "",
     licensePlate: (v.license_plate || v.plate || v.licensePlate || "").trim(),
     pricePerDay: priceNum,
-    status: v.status || "ว่าง",
+    status:
+      v.status ||
+      v.stage ||
+      v.vehicle_stage ||
+      v.car_status ||
+      v.status_text ||
+      "ว่าง",
     // รองรับหลายคีย์จาก backend
     type: v.type || v.v_type || v.ftype || v.category || "Sedan",
     transmission: v.transmission || v.gear_system || "อัตโนมัติ", // <- รองรับ gear_system

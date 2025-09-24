@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo } from "react";
-import Header from "@/Components/Header";
+import HeaderAd from "@/Components/HeaderAd";
 import Footer from "@/Components/Footer";
 import Link from "next/link";
 
@@ -1144,7 +1144,8 @@ export default function DeliveryStaffPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-white text-slate-900">
-      <Header />
+      <title>Delivery Staff - V-Rent</title>
+      <HeaderAd />
       <main className="flex-grow">
         {auth.loading ? (
           <div className="max-w-3xl mx-auto p-8">
