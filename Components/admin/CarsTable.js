@@ -722,8 +722,8 @@ export default function CarsTable({
                 >
                   {/* ค่าใน ERP จะเป็น EN ก็ได้ เราแปลงทีหลังตอนแสดง */}
                   <option value="Available">ว่าง</option>
-                  <option value="In Use">ถูกยืมอยู่</option>
                   <option value="In Rent">ถูกจอง</option>
+                  <option value="In Use">ถูกยืมอยู่</option>
                   <option value="Maintenance">ซ่อมบำรุง</option>
                 </select>
               </div>
