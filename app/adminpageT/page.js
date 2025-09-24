@@ -29,9 +29,37 @@ const ADMIN_ROLES = new Set([
 
 /* แปลง EN → TH สำหรับสถานะรถ (ไว้แสดงในตาราง) */
 const mapStatusToThai = (en) => {
-  const v = String(en || "").toLowerCase();
-  if (v === "in use") return "ถูกยืมอยู่";
-  if (v === "maintenance") return "ซ่อมบำรุง";
+  const v0 = String(en ?? "")
+    .normalize("NFKC")
+    .replace(/\u00A0|\u200B|\u200C|\u200D/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  const compact = v0.replace(/\s+/g, ""); // "inrent", "inuse"
+
+  if (
+    v0 === "in use" ||
+    compact === "inuse" ||
+    v0 === "rented" ||
+    v0 === "กำลังเช่า" ||
+    v0 === "ถูกยืมอยู่"
+  )
+    return "ถูกยืมอยู่";
+  if (
+    v0 === "maintenance" ||
+    v0 === "maintainance" ||
+    v0 === "ซ่อมบำรุง" ||
+    v0 === "ซ่อมแซม"
+  )
+    return "ซ่อมบำรุง";
+  if (
+    v0 === "in rent" ||
+    compact === "inrent" ||
+    v0 === "reserved" ||
+    v0 === "booked" ||
+    v0 === "ถูกจอง"
+  )
+    return "ถูกจอง";
   return "ว่าง";
 };
 
@@ -93,6 +121,12 @@ export default function AdminPage() {
   const carMapByKey = useMemo(() => new Map(), []);
 
   // โหลด user_id จาก localStorage
+  const ADMIN_ROLES_LC = useMemo(
+    () =>
+      new Set(["administrator", "system manager", "admin", "owner", "manager"]),
+    []
+  );
+
   useEffect(() => {
     try {
       if (typeof window !== "undefined") {
@@ -104,6 +138,7 @@ export default function AdminPage() {
   // ===== Role Gate: ตรวจสิทธิ์เข้าถึงหน้า Admin =====
   useEffect(() => {
     let abort = false;
+    const controller = new AbortController();
 
     const checkAccess = async () => {
       try {
@@ -129,6 +164,7 @@ export default function AdminPage() {
         const res = await fetch(u.toString(), {
           method: "GET",
           credentials: "include",
+          signal: controller.signal,
         });
 
         if (!res.ok) {
@@ -172,24 +208,12 @@ export default function AdminPage() {
             .trim()
             .toLowerCase() === "administrator";
 
-        // เช็คชนิด role แบบไม่สนตัวพิมพ์เล็ก-ใหญ่
-        const ADMIN_ROLES_LC = new Set([
-          "administrator",
-          "system manager",
-          "admin",
-          "owner",
-          "manager",
-        ]);
         const hasAdminRole =
           isAdminFlag ||
           idIsAdministrator ||
           rolesLC.some((r) => ADMIN_ROLES_LC.has(r));
 
         setAllowed(hasAdminRole);
-        if (!hasAdminRole) {
-          setAuthError("บัญชีของคุณไม่มีสิทธิ์เข้าถึงหน้าแอดมิน");
-        }
-
         if (!hasAdminRole) {
           setAuthError("บัญชีของคุณไม่มีสิทธิ์เข้าถึงหน้าแอดมิน");
         }
@@ -204,6 +228,7 @@ export default function AdminPage() {
     checkAccess();
     return () => {
       abort = true;
+      controller.abort();
     };
   }, [userId]);
 

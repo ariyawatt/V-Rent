@@ -722,7 +722,7 @@ export default function CarsTable({
                 >
                   {/* ค่าใน ERP จะเป็น EN ก็ได้ เราแปลงทีหลังตอนแสดง */}
                   <option value="Available">ว่าง</option>
-                  <option value="In Rent">ถูกจอง</option>
+                  <option value="Reserved">ถูกจอง</option>
                   <option value="In Use">ถูกยืมอยู่</option>
                   <option value="Maintenance">ซ่อมบำรุง</option>
                 </select>
@@ -857,19 +857,28 @@ export default function CarsTable({
 }
 
 const toEN = (s) => {
-  const x = String(s ?? "")
+  const x0 = String(s ?? "")
     .normalize("NFKC")
     .replace(/\u00A0|\u200B|\u200C|\u200D/g, " ")
     .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-  if (["in rent", "inrent", "reserved", "booked", "ถูกจอง"].includes(x))
-    return "In Rent";
-  if (["in use", "inuse", "rented", "กำลังเช่า", "ถูกยืมอยู่"].includes(x))
+    .toLowerCase();
+  const compact = x0.replace(/\s+/g, "");
+
+  // ถูกจอง → Reserved (canonical)
+  if (
+    ["in rent", "reserved", "booked", "ถูกจอง"].includes(x0) ||
+    compact === "inrent"
+  )
+    return "Reserved";
+  // กำลังเช่า → In Use (canonical)
+  if (
+    ["in use", "rented", "กำลังเช่า", "ถูกยืมอยู่"].includes(x0) ||
+    compact === "inuse"
+  )
     return "In Use";
-  if (["maintenance", "maintainance", "ซ่อมบำรุง", "ซ่อมแซม"].includes(x))
+  if (["maintenance", "maintainance", "ซ่อมบำรุง", "ซ่อมแซม"].includes(x0))
     return "Maintenance";
-  if (["available", "ว่าง"].includes(x)) return "Available";
+  if (["available", "ว่าง"].includes(x0)) return "Available";
   return "Available";
 };
 
@@ -888,7 +897,7 @@ function initCar() {
     fuel: "เบนซิน",
     year: "",
     pricePerDay: "0",
-    status: "ว่าง",
+    status: "Available",
     company: "",
     description: "",
     imageData: "",
