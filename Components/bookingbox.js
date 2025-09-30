@@ -232,6 +232,8 @@ export default function BookingBox({ onSearch }) {
                 name="pickupTime"
                 value={form.pickupTime}
                 onChange={handleChange}
+                step="60"
+                lang="th-TH"
                 className="w-full max-w-full rounded-lg md:rounded-xl border border-gray-500 focus:border-black focus:ring-black px-3 py-2"
                 required
               />
@@ -251,6 +253,8 @@ export default function BookingBox({ onSearch }) {
                 required
               />
             </div>
+
+            {/* เวลาคืนรถ */}
             <div className="md:col-span-3 min-w-0">
               <label className="block text-sm font-medium mb-1">
                 เวลาคืนรถ *
@@ -260,6 +264,8 @@ export default function BookingBox({ onSearch }) {
                 name="returnTime"
                 value={form.returnTime}
                 onChange={handleChange}
+                step="60"
+                lang="th-TH"
                 className="w-full max-w-full rounded-lg md:rounded-xl border border-gray-500 focus:border-black focus:ring-black px-3 py-2"
                 required
               />

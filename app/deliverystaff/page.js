@@ -222,7 +222,7 @@ function CameraBox({ title, onCapture, buttonLabel = "ถ่ายรูป", di
           }}
           disabled={disabled}
         />
-        อัปโหลดรูปแทน
+        อัปโหลดรูป / เปิดกล้อง IPhone
       </label>
 
       {err && <p className="text-xs whitespace-pre-line text-red-600">{err}</p>}
