@@ -152,7 +152,7 @@ export default function BookingBox({ onSearch }) {
               <input
                 type="text"
                 name="pickupLocation"
-                placeholder="เช่น สนามบินดอนเมือง"
+                placeholder="เช่น สนามบินหาดใหญ่"
                 value={form.pickupLocation}
                 onChange={handleChange}
                 className="w-full max-w-full rounded-lg md:rounded-xl border border-gray-500 focus:border-black focus:ring-black px-3 py-2"
@@ -178,7 +178,7 @@ export default function BookingBox({ onSearch }) {
               <input
                 type="text"
                 name="dropoffLocation"
-                placeholder="เช่น สาขาสยามพารากอน"
+                placeholder="เช่น สาขาหาดใหญ่"
                 value={
                   form.returnSame ? form.pickupLocation : form.dropoffLocation
                 }
@@ -291,7 +291,7 @@ export default function BookingBox({ onSearch }) {
             </div>
 
             {/* Promo */}
-            <div className="md:col-span-6 min-w-0">
+            {/* <div className="md:col-span-6 min-w-0">
               <label className="block text-sm font-medium mb-1">
                 โค้ดส่วนลด (ถ้ามี)
               </label>
@@ -303,7 +303,7 @@ export default function BookingBox({ onSearch }) {
                 onChange={handleChange}
                 className="w-full max-w-full rounded-lg md:rounded-xl border border-gray-500 focus:border-black focus:ring-black px-3 py-2"
               />
-            </div>
+            </div> */}
 
             {/* Submit */}
             <div className="md:col-span-12 flex justify-end">

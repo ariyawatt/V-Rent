@@ -200,7 +200,10 @@ export default function AdminPage() {
 
         // flags จากเซิร์ฟเวอร์ (ถ้ามี)
         const isAdminFlag =
-          !!msg?.is_admin || !!msg?.is_system_manager || !!msg?.isAdministrator;
+          !!msg?.is_admin ||
+          !!msg?.is_system_manager ||
+          !!msg?.isAdministrator ||
+          !!msg?.[5];
 
         // เคส id เป็น administrator โดยตรง
         const idIsAdministrator =
